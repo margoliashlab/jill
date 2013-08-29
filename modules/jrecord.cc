@@ -1,7 +1,7 @@
 /*
  * JILL - C++ framework for JACK
  *
- * Copyright (C) 2010 C Daniel Meliza <dmeliza@uchicago.edu>
+ * Copyright (C) 2010-2013 C Daniel Meliza <dan || meliza.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -107,8 +107,8 @@ jack_bufsize(jack_client *client, nframes_t nframes)
         std::size_t bytes = client->sampling_rate() * options.buffer_size_s * client->nports();
         if (port_trig != 0)
                 bytes += client->sampling_rate() * options.pretrigger_size_s * client->nports();
-        // will block until buffer is empty
-        bytes = arf_thread->request_buffer_size(bytes);
+        // will block until buffer is empty (with any current implementation, anyway)
+        bytes = arf_thread->request_buffer_size(bytes * sizeof(sample_t));
         arf_thread->reset();
         LOG << "ringbuffer size (bytes): " << bytes;
         return 0;
@@ -129,6 +129,8 @@ jack_portcon(jack_client *client, jack_port_t* port1, jack_port_t* port2, int co
         else {
                 // close current entry
                 INFO << "last input to trigger port disconnected";
+                // may not satisfy condition that a complete period was written
+                // by the consumer thread
                 arf_thread->reset();
         }
 }
@@ -171,6 +173,7 @@ main(int argc, char **argv)
 
                 /* create ports: one for trigger, and one for each input */
                 if (options.count("trig")) {
+                        LOG << "recordings will be triggered";
                         port_trig = client->register_port("trig_in",JACK_DEFAULT_MIDI_TYPE,
                                                           JackPortIsInput | JackPortIsTerminal, 0);
                         arf_thread.reset(new dsp::triggered_data_writer(
@@ -180,6 +183,7 @@ main(int argc, char **argv)
                                                  options.posttrigger_size_s * client->sampling_rate()));
                 }
                 else {
+                        LOG << "recording will be continuous";
                         arf_thread.reset(new dsp::buffered_data_writer(writer));
                 }
                 /* bind socket for storing messages in arf file */
@@ -207,6 +211,7 @@ main(int argc, char **argv)
                                                 sprintf(buf,"pcm_%03d",name_index);
                                         else
                                                 sprintf(buf,"evt_%03d",name_index);
+                                        LOG << "startup connection: " << *it << " -> " << buf;
                                         name_index++;
                                         client->register_port(buf, jack_port_type(p),
                                                               JackPortIsInput | JackPortIsTerminal, 0);

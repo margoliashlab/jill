@@ -2,7 +2,7 @@
  * JILL - C++ framework for JACK
  *
  * includes code from klick, Copyright (C) 2007-2009  Dominic Sacre  <dominic.sacre@gmx.de>
- * additions Copyright (C) 2010 C Daniel Meliza <dmeliza@uchicago.edu>
+ * additions Copyright (C) 2010-2013 C Daniel Meliza <dan || meliza.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -131,21 +131,25 @@ jack_client::connect_port(string const & src, string const & dest)
 {
 	// simple name-based lookup
 	jack_port_t *p1, *p2;
-	p1 = jack_port_by_name(_client, src.c_str());
-	if (p1==0) {
+        if (src.find(':') != string::npos) {
+                p1 = jack_port_by_name(_client, src.c_str());
+        }
+        else {
 		string n = util::make_string() << jack_get_client_name(_client) << ":" << src;
 		p1 = jack_port_by_name(_client, n.c_str());
-		if (p1==0)
-			throw JackError(util::make_string() << "the port " << n << " does not exist");
 	}
+        if (p1==0)
+                throw JackError(util::make_string() << "the port " << src << " does not exist");
 
-	p2 = jack_port_by_name(_client, dest.c_str());
-	if (p2==0) {
+        if (dest.find(':') != string::npos) {
+                p2 = jack_port_by_name(_client, dest.c_str());
+        }
+        else {
 		string n = util::make_string() << jack_get_client_name(_client) << ":" << dest;
 		p2 = jack_port_by_name(_client, n.c_str());
-		if (p2==0)
-			throw JackError(util::make_string() << "the port " << n << " does not exist");
 	}
+        if (p2==0)
+                throw JackError(util::make_string() << "the port " << dest << " does not exist");
 
         // check that types are the same (FIXME use strcmp if custom types?)
         if (jack_port_type(p1)!=jack_port_type(p2)) {
@@ -247,6 +251,13 @@ jack_client::time() const
         return jack_get_time();
 }
 
+/*
+ * These are the callback functions that are actually registered with the JACK
+ * server. The registration functions take function pointers, not member
+ * function pointers, so these functions have to be static. A pointer to the
+ * object is passed as a void pointer, and used to access the callback functions
+ * registered by the user.
+ */
 
 int
 jack_client::process_callback_(nframes_t nframes, void *arg)
