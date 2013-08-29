@@ -4,17 +4,9 @@
 #include <map>
 #include <string>
 #include <iosfwd>
-#include <pthread.h>
-#include <boost/iostreams/stream.hpp>
-#include <boost/weak_ptr.hpp>
-#include <boost/shared_ptr.hpp>
 #include <arf/types.hpp>
 
 #include "../data_writer.hh"
-
-namespace boost { namespace posix_time {
-                class ptime;
-}}
 
 namespace jill {
 
@@ -23,26 +15,7 @@ namespace jill {
 namespace file {
 
 /**
- * @brief Storage format for log messages
- */
-struct message_t {
-        boost::int64_t sec;
-        boost::int64_t usec;
-        char const * message;       // descriptive
-};
-
-/**
- * @brief Storage format for event data
- */
-struct event_t {
-        boost::uint32_t start;  // relative to entry start
-        boost::uint8_t status;  // see jill::event_t::midi_type
-        char const * message;   // message (hex encoded for standard midi status)
-};
-
-/**
- * Class for storing data in an ARF file.  Access is thread-safe, and calls to
- * non-const member functions may block.
+ * Class for storing data in an ARF file. Access is not thread-safe.
  */
 class arf_writer : public data_writer {
 public:
@@ -55,20 +28,19 @@ public:
          * @param data_source  the source of the data. may be null
          * @param compression  the compression level for new datasets
          */
-        arf_writer(std::string const & sourcename,
-                   std::string const & filename,
+        arf_writer(std::string const & filename,
+                   jill::data_source const & source,
                    std::map<std::string,std::string> const & entry_attrs,
                    int compression=0);
         ~arf_writer();
 
         /* data_writer overrides */
+        bool ready() const;
         void new_entry(nframes_t);
         void close_entry();
-        bool ready() const;
-        bool aligned() const;
         void xrun();
-        void set_data_source(boost::weak_ptr<data_source>);
-        nframes_t write(period_info_t const *, nframes_t start=0, nframes_t stop=0);
+        void write(data_block_t const *, nframes_t, nframes_t);
+        void log(timestamp_t const &, std::string const &, std::string const &);
         void flush();
 
 protected:
@@ -84,19 +56,15 @@ protected:
         dset_map_type::iterator get_dataset(std::string const & name, bool is_sampled);
 
 private:
-        /* implement event_logger::write_log */
-        void write_log(timestamp const &, std::string const &);
         /* find last entry index */
         void _get_last_entry_index();
 
         // references
-        boost::weak_ptr<jill::data_source> _data_source;
+        jill::data_source const & _data_source;
 
         // owned resources
-        pthread_mutex_t _lock;                     // mutex for disk operations
-        std::string _sourcename;                   // who's doing the writing
         arf::file_ptr _file;                       // output file
-        std::map<std::string,std::string> _attrs;  // attributes for new entries
+        std::map<std::string, std::string> _attrs; // attributes for new entries
         arf::packet_table_ptr _log;                // log dataset
         arf::entry_ptr _entry;                     // current entry (owned by thread)
         dset_map_type _dsets;                      // pointers to packet tables (owned)
@@ -104,14 +72,14 @@ private:
 
         // these variables allow more precise timestamps; they are registered to
         // each other when set_data_source is called
-        boost::shared_ptr<boost::posix_time::ptime> _base_ptime;
+        timestamp_t _base_ptime;
         utime_t   _base_usec;
 
         // local state
         nframes_t _entry_start;                    // offset sample counts
-        nframes_t _period_start;                   // assign chunks to channels
+        nframes_t _last_frame;                     // last frame written to the
+                                                   // current entry
         std::size_t _entry_idx;                    // manage entry numbering
-        std::size_t _channel_idx;                  // index channel
 
 };
 

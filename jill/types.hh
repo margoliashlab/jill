@@ -13,7 +13,7 @@
 
 #include <jack/types.h>
 #include <jack/transport.h>
-#include <arf/types.hpp>
+#include <iosfwd>
 #include <stdexcept>
 
 /**
@@ -34,29 +34,64 @@ typedef jack_time_t utime_t;
 /** A data type holding extended position information. Inherited from JACK */
 typedef jack_position_t position_t;
 
-/**
- * A data structure storing information about a period. Contains information
- * about timestamp, and frame count, as well as a void pointer that can be used
- * to reference additional data.
- */
-struct period_info_t {
-        nframes_t time;    // time of the current period
-        nframes_t nframes; // number of frames in period
-        // NB: requiring const is somewhat restrictive; may change
-        void const * arg;  // pointer to external data
+/** Define the types of data moved through JILL. Corresponds to jack port types */
+enum dtype_t {
+        SAMPLED = 0,
+        EVENT = 1,
+        VIDEO = 2
+};
 
-        /** The size of the period in bytes */
-        std::size_t bytes() const { return nframes * sizeof(sample_t); }
+/**
+ * Defines a block of data. This class does not fully encapsulate the data, but
+ * defines a header that precedes the data. The header specifies the time of the
+ * data, its type, and the size of two arrays that follow the header. The first
+ * array gives the id (channel) of the data, and the second gives the data.
+ *
+ * For sampled data, the data is an array of sample_t elements representing a
+ * time series starting at time. For event data, the data is an array of
+ * (unsigned) chars describing the event. See midi.hh for the layout of this
+ * data.
+ *
+ * The id() and data() members are only valid if the header precedes the two
+ * data arrays.
+ */
+struct data_block_t {
+        nframes_t time;         // the time of the block, in frames
+        dtype_t dtype;          // the type of data in the block
+        std::size_t sz_id;      // the number of bytes in the id
+        std::size_t sz_data;    // the number of bytes in the data
+
+        // total size, including header
+        std::size_t size() const { return sizeof(data_block_t) + sz_id + sz_data; }
+        // read id into a new string
+        std::string id() const {
+                return std::string(reinterpret_cast<char const *>(this) + sizeof(data_block_t),
+                                   sz_id);
+        }
+        // pointer to data
+        void const * data() const {
+                return reinterpret_cast<char const *>(this) + sizeof(data_block_t) + sz_id;
+        }
+        // number of frames
+        nframes_t nframes() const {
+                // TODO change if multiple events in a block
+                return (dtype == SAMPLED) ? sz_data / sizeof(sample_t) : 1;
+        }
+}; // does this need to be packed?
+
+/** Base type for all jill errors */
+struct Error : public std::runtime_error {
+        Error(std::string const & w) : std::runtime_error(w) { }
 };
 
 /** Type for jack errors */
-struct JackError : public std::runtime_error {
-        JackError(std::string const & w) : std::runtime_error(w) { }
+struct JackError : public Error {
+        JackError(std::string const & w) : Error(w) { }
 };
 
 /** Thrown for errors related to filesystem access */
-struct FileError : public std::runtime_error {
-	FileError(std::string const & w) : std::runtime_error(w) { }
+struct FileError : public Error {
+	FileError(std::string const & w) : Error(w) { }
 };
 
 }

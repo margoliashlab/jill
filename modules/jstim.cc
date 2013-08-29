@@ -14,11 +14,11 @@
 #include <boost/filesystem.hpp>
 #include <boost/ptr_container/ptr_vector.hpp>
 
+#include "jill/logging.hh"
 #include "jill/jack_client.hh"
 #include "jill/program_options.hh"
 #include "jill/midi.hh"
 #include "jill/file/stimfile.hh"
-#include "jill/util/stream_logger.hh"
 #include "jill/util/readahead_stimqueue.hh"
 #include "jill/dsp/ringbuffer.hh"
 
@@ -57,7 +57,6 @@ protected:
 
 
 jstim_options options(PROGRAM_NAME);
-boost::shared_ptr<util::stream_logger> logger;
 boost::shared_ptr<jack_client> client;
 boost::shared_ptr<util::readahead_stimqueue> queue;
 boost::ptr_vector<stimulus_t> _stimuli;
@@ -111,6 +110,7 @@ process(jack_client *client, nframes_t nframes, nframes_t time)
                 if (period_offset > nframes) return 0; // no trigger
                 last_start = time + period_offset;
                 midi::write_message(trig, period_offset, midi::stim_on, stim->name());
+                DBG << "playback triggered: time=" << last_start << ", stim=" << stim->name();
         }
         // has enough time elapsed since the last stim?
         else {
@@ -124,6 +124,7 @@ process(jack_client *client, nframes_t nframes, nframes_t time)
                 if (period_offset >= nframes) return 0; // not time yet
                 last_start = time + period_offset;
                 midi::write_message(trig, period_offset, midi::stim_on, stim->name());
+                DBG << "playback started: time=" << last_start << ", stim=" << stim->name();
         }
         // sanity check - will be optimized out
         assert(period_offset < nframes);
@@ -142,6 +143,7 @@ process(jack_client *client, nframes_t nframes, nframes_t time)
                 last_stop = time + period_offset + nsamples;
                 midi::write_message(trig, period_offset + nsamples,
                                     midi::stim_off, stim->name());
+                DBG << "playback ended: time=" << last_stop << ", stim=" << stim->name();
                 stim_offset = 0;
         }
 
@@ -199,7 +201,7 @@ init_stimset(std::vector<string> const & stims, size_t const default_nreps)
                                 _stimlist.push_back(stim);
                 }
                 catch (jill::FileError const & e) {
-                        logger->log() << "invalid stimulus " << p << ": " << e.what();
+                        LOG << "invalid stimulus " << p << ": " << e.what();
                 }
         }
 }
@@ -211,30 +213,30 @@ main(int argc, char **argv)
 	using namespace std;
 	try {
 		options.parse(argc,argv);
-                logger.reset(new util::stream_logger(options.client_name, cout));
-                logger->log() << PROGRAM_NAME ", version " JILL_VERSION;
-
-                client.reset(new jack_client(options.client_name, logger, options.server_name));
+                client.reset(new jack_client(options.client_name, options.server_name));
                 options.min_gap = options.min_gap_sec * client->sampling_rate();
                 options.min_interval = options.min_interval_sec * client->sampling_rate();
                 options.trigout_chan &= midi::chan_nib;
 
                 if (!options.count("trig")) {
-                        logger->log() << "minimum gap: " << options.min_gap_sec << "s ("
+                        LOG << "minimum gap: " << options.min_gap_sec << "s ("
                                       << options.min_gap << " samples)";
-                        logger->log() << "minimum interval: " << options.min_interval_sec << "s ("
+                        LOG << "minimum interval: " << options.min_interval_sec << "s ("
                                       << options.min_interval << " samples)";
                 }
+		if (options.stimuli.size() == 0) {
+		        LOG << "no stimuli; quitting";
+			throw Exit(0);
+		}
 
                 /* stimulus queue */
                 init_stimset(options.stimuli, options.nreps);
                 if (options.count("shuffle")) {
-                        logger->log() << "shuffled stimuli";
+                        LOG << "shuffled stimuli";
                         random_shuffle(_stimlist.begin(), _stimlist.end());
                 }
                 queue.reset(new util::readahead_stimqueue(_stimlist.begin(), _stimlist.end(),
                                                           client->sampling_rate(),
-                                                          logger,
                                                           options.count("loop")));
 
                 port_out = client->register_port("out", JACK_DEFAULT_AUDIO_TYPE,
@@ -242,7 +244,7 @@ main(int argc, char **argv)
                 port_trigout = client->register_port("trig_out",JACK_DEFAULT_MIDI_TYPE,
                                                      JackPortIsOutput | JackPortIsTerminal, 0);
                 if (options.count("trig")) {
-                        logger->log() << "triggering playback from trig_in";
+                        LOG << "triggering playback from trig_in";
                         port_trigin = client->register_port("trig_in",JACK_DEFAULT_MIDI_TYPE,
                                                             JackPortIsInput | JackPortIsTerminal, 0);
                 }
@@ -275,8 +277,7 @@ main(int argc, char **argv)
 		return e.status();
 	}
 	catch (std::exception const &e) {
-                if (logger) logger->log() << "ERROR: " << e.what();
-                else cerr << "ERROR: " << e.what() << endl;
+                LOG << "ERROR: " << e.what();
 		return EXIT_FAILURE;
 	}
 
@@ -315,14 +316,13 @@ jstim_options::jstim_options(string const &program_name)
         cmd_opts.add_options()
                 ("stim", po::value<vector<string> >(&stimuli)->multitoken(), "stimulus file");
         pos_opts.add("stim", -1);
-        cfg_opts.add(jillopts).add(opts);
         visible_opts.add(jillopts).add(opts);
 }
 
 void
 jstim_options::print_usage()
 {
-        std::cout << "Usage: " << _program_name << " [options] [stimfile [nreps]] [stimfile [nreps]] ...\n"
+        std::cout << "Usage: " << _program_name << " [options] [stimfile [nreps]] [stim [nreps]] ...\n"
                   << visible_opts << std::endl
                   << "Ports:\n"
                   << " * out:       sampled output of the presented stimulus\n"

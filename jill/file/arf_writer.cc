@@ -1,14 +1,11 @@
 #include <arf.hpp>
-#include <boost/shared_ptr.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
-#include <boost/date_time/c_local_time_adjustor.hpp>
-#include <sys/time.h>
-#include <jack/jack.h>
 
 #include "arf_writer.hh"
+#include "../version.hh"
+#include "../logging.hh"
 #include "../data_source.hh"
 #include "../midi.hh"
-#include "../util/string.hh"
 
 #define JILL_LOGDATASET_NAME "jill_log"
 #define ARF_CHUNK_SIZE 1024
@@ -19,26 +16,42 @@ using namespace jill::file;
 using namespace boost::posix_time;
 using namespace boost::gregorian;
 
-typedef boost::shared_ptr<jill::data_source> source_ptr;
+static const ptime epoch = ptime(date(1970,1,1));
+
+/**
+ * @brief Storage format for log messages
+ */
+struct message_t {
+        boost::int64_t sec;
+        boost::int64_t usec;
+        char const * message;       // descriptive
+};
+
+/**
+ * @brief Storage format for event data
+ */
+struct event_t {
+        boost::uint32_t start;  // relative to entry start
+        boost::uint8_t status;  // see jill::event_t::midi_type
+        char const * message;   // message (hex encoded for standard midi status)
+};
 
 /**
  * convert a midi message to hex
  * @param in   the midi message
  * @param size the length of the message
- * @param out  the output buffer
  */
 template <typename T>
-static std::string
+char *
 to_hex(T const * in, std::size_t size)
 {
-        char out[size*2];
+        char * out = new char[size * 2 + 2];
+        sprintf(out, "0x");
         for (std::size_t i = 0; i < size; ++i) {
-                sprintf(out + i*2, "%02x", in[i]);
+                sprintf(out + i*2 + 2, "%02x", in[i]);
         }
         return out;
 }
-
-static const ptime epoch = ptime(date(1970,1,1));
 
 // template specializations for compound data types
 namespace arf { namespace h5t { namespace detail {
@@ -75,91 +88,83 @@ struct datatype_traits<event_t> {
 
 }}}
 
-arf_writer::arf_writer(string const & sourcename,
-                       string const & filename,
+arf_writer::arf_writer(string const & filename,
+                       data_source const & source,
                        map<string,string> const & entry_attrs,
                        int compression)
-        : _sourcename(sourcename),
+        : _data_source(source),
           _attrs(entry_attrs),
           _compression(compression),
-          _entry_start(0), _period_start(0), _entry_idx(0), _channel_idx(0)
+          _entry_start(0), _entry_idx(0)
 {
-        pthread_mutex_init(&_lock, 0);
+        _base_usec = _data_source.time();
+        _base_ptime = microsec_clock::universal_time();
+        LOG << "registered system clock to usec clock at " << _base_usec;
+
         _file.reset(new arf::file(filename, "a"));
+        LOG << "opened file: " << filename;
+        if (!_file->has_attribute("file_creator")) {
+                _file->write_attribute("file_creator", "org.meliza.jill/jrecord " JILL_VERSION);
+        }
 
         // open/create log
-        arf::h5t::wrapper<jill::file::message_t> t;
+        arf::h5t::wrapper<message_t> t;
         arf::h5t::datatype logtype(t);
         if (_file->contains(JILL_LOGDATASET_NAME)) {
                 _log.reset(new arf::h5pt::packet_table(_file->hid(), JILL_LOGDATASET_NAME));
                 if (logtype != *(_log->datatype())) {
                         throw arf::Exception(JILL_LOGDATASET_NAME " has wrong datatype");
                 }
+                INFO << "appending log messages to /" << JILL_LOGDATASET_NAME;
         }
         else {
                 _log.reset(new arf::h5pt::packet_table(_file->hid(), JILL_LOGDATASET_NAME,
                                                        logtype, ARF_CHUNK_SIZE, _compression));
+                INFO << "created log dataset /" << JILL_LOGDATASET_NAME;
         }
         _get_last_entry_index();
-
-        log() << "opened file: " << filename;
 }
 
 arf_writer::~arf_writer()
-{
-        // NB: assume the HDF5 library will close the file properly
-        // without needed to manually flush.
-        pthread_mutex_destroy(&_lock);
-}
+{}
 
 void
 arf_writer::new_entry(nframes_t frame_count)
 {
-
         utime_t frame_usec = 0;
 
-        util::make_string name;
-        name << _sourcename << '_' << setw(4) << setfill('0') << _entry_idx++;
+        std::ostringstream name;
+        name << _data_source.name() << '_' << setw(4) << setfill('0') << _entry_idx++;
 
         close_entry();
         _entry_start = frame_count;
 
         time_duration ts;
-        if (source_ptr source = _data_source.lock()) {
-                frame_usec = source->time(_entry_start);
-                ts = (*_base_ptime + microseconds(frame_usec - _base_usec)) - epoch;
-        }
-        else {
-                ts = microsec_clock::universal_time() - epoch;
-        }
+        frame_usec = _data_source.time(_entry_start);
+        ts = (_base_ptime + microseconds(frame_usec - _base_usec)) - epoch;
 
-        pthread_mutex_lock(&_lock);
-        _entry.reset(new arf::entry(*_file, name,
+        _entry.reset(new arf::entry(*_file, name.str(),
                                     ts.total_seconds(), ts.fractional_seconds()));
-        pthread_mutex_unlock(&_lock);
 
-        log() << "created entry: " << _entry->name() << " (frame=" << _entry_start << ")" ;
+        LOG << "created entry: " << _entry->name() << " (frame=" << _entry_start << ")" ;
 
-        pthread_mutex_lock(&_lock);
         arf::h5a::node::attr_writer a = _entry->write_attribute();
-        a("jack_frame", _entry_start)("jill_process", _sourcename);
+        a("jack_frame", _entry_start);
+        a("jack_usec", frame_usec);
+        a("jack_sampling_rate", _data_source.sampling_rate());
+        a("entry_creator", "org.meliza.jill/jrecord " JILL_VERSION);
         for_each(_attrs.begin(), _attrs.end(), a);
-        if (frame_usec != 0) {
-                a("jack_usec", frame_usec);
-        }
-        pthread_mutex_unlock(&_lock);
 }
 
 void
 arf_writer::close_entry()
 {
         _dsets.clear();         // release any old packet tables
-        _channel_idx = 0;
         if (_entry) {
-                log_msg o = log();
-                o << "closed entry: " << _entry->name() << " (frame=" << _period_start << ")";
-                if (!aligned())
-                        o << " (warning: unequal dataset length)";
+                log_msg o;
+                o << "closed entry: " << _entry->name() << " (frame=" << _last_frame << ")";
+                // if (!aligned())
+                //         o << " (warning: unequal dataset length)";
         }
         _entry.reset();
 }
@@ -170,111 +175,55 @@ arf_writer::ready() const
         return _entry;
 }
 
-bool
-arf_writer::aligned() const
-{
-        return (_period_start != _entry_start) && (_channel_idx == _dsets.size());
-}
-
 void
 arf_writer::xrun()
 {
-        log() << "ERROR: xrun" ;
+        LOG << "ERROR: xrun" ;
         if (_entry) {
                 // tag entry as possibly corrupt
-                pthread_mutex_lock(&_lock);
                 _entry->write_attribute("jill_error","data xrun");
-                pthread_mutex_unlock(&_lock);
         }
 }
 
 void
-arf_writer::set_data_source(boost::weak_ptr<data_source> d)
+arf_writer::write(data_block_t const * data, nframes_t start_frame, nframes_t stop_frame)
 {
-        if (source_ptr source = d.lock()) {
-                _data_source = d;
-                // timestamps are calculated from delta of the usec clock, and
-                // referenced against the clock of the first entry we wrote. The
-                // usec clock is more precise because JACK uses a DLL to reduce
-                // jitter. Unfortunately there doesn't seem to be any direct way
-                // to convert usec values to posix times.
-                _base_usec = source->time();
-                _base_ptime.reset(new ptime(microsec_clock::universal_time()));
-                log() << "registered system clock to usec clock at " << _base_usec;
+        if (data->sz_data == 0) return;
+        std::string id = data->id();
+        nframes_t nframes = data->nframes();
+        dset_map_type::iterator dset;
+        stop_frame = (stop_frame > 0) ? std::min(stop_frame, nframes) : nframes;
+
+        // check for overflow of sample counter
+        if (_entry && (data->time + start_frame) < _entry_start) {
+                LOG << "sample count overflow (entry=" << _entry_start
+                    << ", data=" << (data->time + start_frame) << ")";
+                close_entry();
         }
-}
-
-nframes_t
-arf_writer::write(period_info_t const * info, nframes_t start_frame, nframes_t stop_frame)
-{
-        util::make_string dset_name;
-        bool is_sampled = true;
-        jack_port_t const * port = static_cast<jack_port_t const *>(info->arg);
-
-        if (!_entry) new_entry(info->time);
-        stop_frame = (stop_frame > 0) ? std::min(stop_frame, info->nframes) : info->nframes;
-
-        /* does this start a new period */
-        if (info->time != _period_start) {
-                // new period
-                _channel_idx = 0;
-                _period_start = info->time;
+        if (!_entry) {
+                new_entry(data->time);
         }
-
-        /* get channel information */
-        if (port) {
-                // use name information in port to look up dataset
-                dset_name << jack_port_short_name(port);
-                is_sampled = strcmp(jack_port_type(port),JACK_DEFAULT_AUDIO_TYPE)==0;
-        }
-        else {
-                // no port information (primarily a test case)
-                dset_name << "pcm_" << setw(3) << setfill('0') << _channel_idx;
-                // assume the port type is audio - not really any way to
-                // simulate midi data outside jack framework
-        }
-        _channel_idx += 1;
-        dset_map_type::iterator dset = get_dataset(dset_name, is_sampled);
-
         /* write the data */
-        if (is_sampled) {
-                assert (stop_frame <= info->nframes);
-                sample_t const * data = reinterpret_cast<sample_t const *>(info + 1);
-                pthread_mutex_lock(&_lock);
-                dset->second->write(data + start_frame, stop_frame - start_frame);
-                pthread_mutex_unlock(&_lock);
+        if (data->dtype == SAMPLED) {
+                dset = get_dataset(id, true);
+                sample_t const * samples = reinterpret_cast<sample_t const *>(data->data());
+                dset->second->write(samples + start_frame, stop_frame - start_frame);
         }
-        else {
-                // based on my inspection of jackd source, JACK api should
-                // declare port_buffer argument const, so const_cast should be
-                // safe
-                void * data = const_cast<period_info_t*>(info+1);
-                jack_midi_event_t event;
-                nframes_t nevents = jack_midi_get_event_count(data);
-                string s;
-                for (nframes_t j = 0; j < nevents; ++j) {
-                        jack_midi_event_get(&event, data, j);
-                        if (event.size == 0) continue;
-                        if (event.time < start_frame || event.time >= stop_frame) continue;
-                        event_t e = { info->time + event.time - _entry_start,
-                                      event.buffer[0],
-                                      "" };
-                        // hex encode standard midi events
-                        if (event.size > 1) {
-                                if (e.status < midi::note_off)
-                                        e.message = reinterpret_cast<char*>(event.buffer+1);
-                                else {
-                                        s = to_hex(event.buffer+1,event.size-1);
-                                        e.message = s.c_str();
-                                }
-                        }
-                        pthread_mutex_lock(&_lock);
-                        dset->second->write(&e, 1);
-                        pthread_mutex_unlock(&_lock);
+        else if (data->dtype == EVENT) {
+                char * message = 0;
+                dset = get_dataset(id, false);
+                char const * buffer = reinterpret_cast<char const *>(data->data());
+                event_t e = {data->time - _entry_start, (uint8_t)buffer[0], buffer+1};
+                if (e.status >= midi::note_off) {
+                        // hex-encode standard midi events
+                        e.message = message = to_hex(buffer + 1, data->sz_data - 1);
                 }
+                DBG << "event: t=" << data->time << " id=" << id << " status=" << int(e.status)
+                    << " message=" << e.message;
+                dset->second->write(&e, 1);
+                if (message) delete[] message;
         }
-        return stop_frame - start_frame;
-
+        _last_frame = data->time + stop_frame;
 }
 
 void
@@ -284,22 +233,14 @@ arf_writer::flush()
 }
 
 void
-arf_writer::write_log(timestamp const &utc, string const &msg)
+arf_writer::log(timestamp_t const &utc, string const & source, string const & msg)
 {
-        typedef boost::date_time::c_local_adjustor<ptime> local_adj;
-
-        // for some reason make_string's output gets corrupted by H5PTwrite
-        char m[msg.length() + _sourcename.length() + 8];
-        sprintf(m, "[%s] %s", _sourcename.c_str(), msg.c_str());
+        char m[msg.length() + source.length() + 4];
+        sprintf(m, "[%s] %s", source.c_str(), msg.c_str());
 
         time_duration t = utc - epoch;
-        jill::file::message_t message = { t.total_seconds(), t.fractional_seconds(), m };
-        pthread_mutex_lock(&_lock);
+        message_t message = { t.total_seconds(), t.fractional_seconds(), m };
         _log->write(&message, 1);
-        pthread_mutex_unlock(&_lock);
-
-        ptime local = local_adj::utc_to_local(utc);
-        std::cout << to_iso_string(local) << ' ' << m << std::endl;
 }
 
 void
@@ -308,12 +249,13 @@ arf_writer::_get_last_entry_index()
         unsigned int val;
         vector<string> entries = _file->children();  // read-only
         for (vector<string>::const_iterator it = entries.begin(); it != entries.end(); ++it) {
-                char const * match = strstr(it->c_str(), _sourcename.c_str());
+                char const * match = strstr(it->c_str(), _data_source.name());
                 if (match == 0) continue;
-                int rc = sscanf(match + _sourcename.length(), "_%ud", &val);
+                int rc = sscanf(match + strlen(_data_source.name()), "_%ud", &val);
                 val += 1;
                 if (rc == 1 && val > _entry_idx) _entry_idx = val;
         }
+        INFO << "last entry index: " << _entry_idx;
 }
 
 
@@ -323,7 +265,6 @@ arf_writer::get_dataset(string const & name, bool is_sampled)
         dset_map_type::iterator dset = _dsets.find(name);
         if (dset == _dsets.end()) {
                 arf::packet_table_ptr pt;
-                pthread_mutex_lock(&_lock);
                 if (is_sampled) {
                         pt = _entry->create_packet_table<sample_t>(name, "", arf::UNDEFINED,
                                                                           false, ARF_CHUNK_SIZE, _compression);
@@ -332,11 +273,8 @@ arf_writer::get_dataset(string const & name, bool is_sampled)
                         pt = _entry->create_packet_table<event_t>(name, "samples", arf::EVENT,
                                                                           false, ARF_CHUNK_SIZE, _compression);
                 }
-                if (source_ptr source = _data_source.lock()) {
-                        pt->write_attribute("sampling_rate", source->sampling_rate());
-                }
-                pthread_mutex_unlock(&_lock);
-                log() << "created dataset: " << pt->name() ;
+                pt->write_attribute("sampling_rate", _data_source.sampling_rate());
+                LOG << "created dataset: " << pt->name() ;
                 dset = _dsets.insert(dset, make_pair(name,pt));
         }
         return dset;

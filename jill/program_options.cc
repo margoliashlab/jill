@@ -1,8 +1,7 @@
 /*
  * JILL - C++ framework for JACK
  *
- * includes code from klick, Copyright (C) 2007-2009  Dominic Sacre  <dominic.sacre@gmx.de>
- * additions Copyright (C) 2010 C Daniel Meliza <dmeliza@uchicago.edu>
+ * Copyright (C) 2010 C Daniel Meliza <dmeliza@uchicago.edu>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,6 +14,8 @@
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 
+#include "logging.hh"
+#include "logger.hh"
 #include "program_options.hh"
 
 using namespace jill;
@@ -64,16 +65,22 @@ program_options::parse(int argc, char **argv)
 		print_version();
 		throw Exit(EXIT_SUCCESS);
 	}
+        // set source for logging
+        logger::instance().set_sourcename(get<string>("client_name", _program_name));
+        string server_name = get<string>("server_name","default");
+        logger::instance().connect(server_name);
+        LOG << _program_name << ", version " JILL_VERSION;
+        LOG << "jackd server: " << server_name;
 
 	boost::filesystem::path configfile = get<string>("config","");
 	if (boost::filesystem::is_regular_file(configfile)) {
 		boost::filesystem::ifstream ff(configfile);
-		std::cout << "[Parsing " << configfile.string() << ']' << std::endl;
-		po::parsed_options parsed = po::parse_config_file(ff, cfg_opts, true);
+		LOG << "[Parsing " << configfile.string() << ']';
+		po::parsed_options parsed = po::parse_config_file(ff, cmd_opts, true);
 		po::store(parsed, vmap);
 	}
         else if (!configfile.empty()) {
-                std::cerr << "ERROR: configuration file " << configfile << " doesn't exist" << std::endl;
+                LOG << "ERROR: configuration file " << configfile << " doesn't exist";
                 throw Exit(EXIT_FAILURE);
         }
 

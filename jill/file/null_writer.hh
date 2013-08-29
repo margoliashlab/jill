@@ -1,6 +1,18 @@
+/*
+ * JILL - C++ framework for JACK
+ *
+ * Copyright (C) 2010 C Daniel Meliza <dmeliza@uchicago.edu>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ */
 #ifndef _NULL_WRITER_HH
 #define _NULL_WRITER_HH
 
+#include "../logging.hh"
 #include "../data_writer.hh"
 
 namespace jill { namespace file {
@@ -9,18 +21,30 @@ namespace jill { namespace file {
 class null_writer : public data_writer {
 
 public:
-        void new_entry(nframes_t) {}
-        void close_entry() {}
-        bool ready() const { return true; }
+        null_writer() : _entry(0), _last_entry(0) {}
+        void new_entry(nframes_t frame) {
+                _entry = ++_last_entry;
+                LOG << "new entry " << _entry << ", frame=" << frame;
+        }
+        void close_entry() {
+                LOG << "closed entry " <<  _entry;
+                _entry = 0;
+        }
+        void xrun() {
+                LOG << "got xrun";
+        }
+        bool ready() const { return _entry; }
         bool aligned() const { return true; }
-        void xrun() {}
-        nframes_t write(period_info_t const * info, nframes_t start=0, nframes_t stop=0) {
-                std::cout << "\rgot period: time=" << info->time << ", nframes=" << info->nframes << std::flush;
-                return info->nframes;
+        void write(data_block_t const * data, nframes_t start, nframes_t stop) {
+                if (!_entry) new_entry(data->time);
+                std::cout << "\rgot period: time=" << data->time << ", id=" << data->id()
+                          << ", type=" << data->dtype << ", nframes=" << data->nframes()
+                          << ", start=" << start << ", stop=" << stop << ' ' << std::flush;
         }
-        void write_log(timestamp const &, std::string const & msg) {
-                std::cout << msg << std::endl;
-        }
+
+private:
+        int _entry;
+        int _last_entry;
 };
 
 }}

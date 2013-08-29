@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <boost/shared_ptr.hpp>
 
+#include "jill/logging.hh"
 #include "jill/jack_client.hh"
 #include "jill/program_options.hh"
 #include "jill/midi.hh"
@@ -54,45 +55,42 @@ protected:
 };
 
 jrecord_options options(PROGRAM_NAME);
-boost::shared_ptr<file::arf_writer> writer;
 boost::shared_ptr<jack_client> client;
 boost::shared_ptr<dsp::buffered_data_writer> arf_thread;
 jack_port_t * port_trig = 0;
-int _close_entry_flag = 0;
 
-/*
- * Copy data from ports into ringbuffer. Note that the first port is the trigger
- * port, so it contains MIDI data; however, the buffer size is the same so it
- * can be treated like audio data for now (should probably assert this
- * somewhere)
- */
+
 int
 process(jack_client *client, nframes_t nframes, nframes_t time)
 {
-        sample_t *port_buffer;
+        jack_port_t *port;
+        void *buffer;
         jack_client::port_list_type::const_iterator it;
 
-        // check that the ringbuffer has enough space for all the channels so we
-        // don't write partial periods. If full, put the thread into Xrun state.
-        // It will probably discard the samples until it can clear out the buffer
-        if (arf_thread->write_space(nframes) < client->nports()) {
-                arf_thread->xrun();
-        }
-
         for (it = client->ports().begin(); it != client->ports().end(); ++it) {
-                period_info_t info = {time, nframes, *it};
-                port_buffer = client->samples(*it, nframes);
-                arf_thread->push(port_buffer, info);
-        }
-
-        if (_close_entry_flag) {
-                arf_thread->close_entry(time);
-                __sync_add_and_fetch(&_close_entry_flag,-1);
+                port = *it;
+                buffer = jack_port_get_buffer(port, nframes);
+                if (buffer == 0) continue;
+                if (strcmp(jack_port_type(port), JACK_DEFAULT_AUDIO_TYPE) == 0) {
+                        arf_thread->push(time, SAMPLED, jack_port_short_name(port),
+                                         nframes * sizeof(sample_t), buffer);
+                }
+                else {
+                        jack_midi_event_t event;
+                        nframes_t nevents = jack_midi_get_event_count(buffer);
+                        for (nframes_t j = 0; j < nevents; ++j) {
+                                jack_midi_event_get(&event, buffer, j);
+                                if (event.size == 0) continue;
+                                arf_thread->push(time + event.time, EVENT, jack_port_short_name(port),
+                                                 event.size, event.buffer);
+                        }
+                }
         }
         arf_thread->data_ready();
 
         return 0;
 }
+
 
 int
 jack_xrun(jack_client *client, float delay)
@@ -102,13 +100,17 @@ jack_xrun(jack_client *client, float delay)
         return 0;
 }
 
+
 int
 jack_bufsize(jack_client *client, nframes_t nframes)
 {
-        // blocks until old data is flushed
-        nframes = arf_thread->resize_buffer(client->sampling_rate() * options.buffer_size_s, client->nports());
-        writer->log() << "ringbuffer size (samples): " << nframes;
-        writer->close_entry();
+        std::size_t bytes = client->sampling_rate() * options.buffer_size_s * client->nports();
+        if (port_trig != 0)
+                bytes += client->sampling_rate() * options.pretrigger_size_s * client->nports();
+        // will block until buffer is empty
+        bytes = arf_thread->request_buffer_size(bytes);
+        arf_thread->reset();
+        LOG << "ringbuffer size (bytes): " << bytes;
         return 0;
 }
 
@@ -117,20 +119,28 @@ void
 jack_portcon(jack_client *client, jack_port_t* port1, jack_port_t* port2, int connected)
 {
         /* determine if the last connection to the trigger port was cut */
-        if (port_trig==0) return;
-        const char ** connects = jack_port_get_connections(port_trig);
+        if (port_trig == 0 || connected || strcmp(jack_port_name(port2), jack_port_name(port_trig)) != 0)
+                return;
+        const char ** connections = jack_port_get_connections(port_trig);
         // can't directly compare port addresses
-        if (!connected && strcmp(jack_port_name(port2),jack_port_name(port_trig))==0 && connects == 0) {
-                // flag process to close current entry
-                __sync_add_and_fetch(&_close_entry_flag,1);
+        if (connections) {
+                jack_free(connections);
         }
-        if (connects) jack_free(connects);
+        else {
+                // close current entry
+                INFO << "last input to trigger port disconnected";
+                arf_thread->reset();
+        }
 }
 
+
 void
-jack_shutdown(jack_status_t code, char const *)
+jack_shutdown(jack_status_t code, char const * msg)
 {
-        if (arf_thread) arf_thread->stop();
+        LOG << "jackd shut the client down (" << msg << ")";
+        if (arf_thread) {
+                arf_thread->stop();
+        }
 }
 
 
@@ -142,6 +152,7 @@ signal_handler(int sig)
         }
 }
 
+
 int
 main(int argc, char **argv)
 {
@@ -149,17 +160,14 @@ main(int argc, char **argv)
         typedef svec::const_iterator svec_iterator;
         int ret = 0;
         map<string,string> port_connections;
+        boost::shared_ptr<data_writer> writer;
 	try {
 		options.parse(argc,argv);
-
-                writer.reset(new file::arf_writer(PROGRAM_NAME,
-                                                  options.output_file,
+                client.reset(new jack_client(options.client_name, options.server_name));
+                writer.reset(new file::arf_writer(options.output_file,
+                                                  *client,
                                                   options.additional_options,
                                                   options.compression));
-                writer->log() << PROGRAM_NAME ", version " JILL_VERSION;
-
-                client.reset(new jack_client(options.client_name, writer, options.server_name));
-                writer->set_data_source(client);
 
                 /* create ports: one for trigger, and one for each input */
                 if (options.count("trig")) {
@@ -167,13 +175,15 @@ main(int argc, char **argv)
                                                           JackPortIsInput | JackPortIsTerminal, 0);
                         arf_thread.reset(new dsp::triggered_data_writer(
                                                  writer,
-                                                 port_trig,
+                                                 jack_port_short_name(port_trig),
                                                  options.pretrigger_size_s * client->sampling_rate(),
                                                  options.posttrigger_size_s * client->sampling_rate()));
                 }
                 else {
                         arf_thread.reset(new dsp::buffered_data_writer(writer));
                 }
+                /* bind socket for storing messages in arf file */
+                arf_thread->bind_logger(options.server_name);
 
                 /* register input ports */
                 if (options.count("in")) {
@@ -182,12 +192,12 @@ main(int argc, char **argv)
                         for ( svec_iterator it = plist.begin(); it!= plist.end(); ++it) {
                                 jack_port_t *p = client->get_port(*it);
                                 if (p==0) {
-                                        writer->log() << "error registering port: source port \""
+                                        LOG << "error registering port: source port \""
                                                       << *it << "\" does not exist";
                                         throw Exit(-1);
                                 }
                                 else if (!(jack_port_flags(p) & JackPortIsOutput)) {
-                                        writer->log() << "error registering port: source port \""
+                                        LOG << "error registering port: source port \""
                                                       << *it << "\" is not an output port";
                                         throw Exit(-1);
                                 }
@@ -217,7 +227,6 @@ main(int argc, char **argv)
                                                JackPortIsInput | JackPortIsTerminal, 0);
                 }
 
-
                 // register signal handlers
 		signal(SIGINT,  signal_handler);
 		signal(SIGTERM, signal_handler);
@@ -230,11 +239,9 @@ main(int argc, char **argv)
                 client->set_process_callback(process);
                 client->set_buffer_size_callback(jack_bufsize);
 
-
-
                 // start disk thread and activate process callback
-                arf_thread->start();
                 client->activate();
+                arf_thread->start();
 
 		/* connect ports */
                 if (options.count("trig")) {
@@ -253,8 +260,7 @@ main(int argc, char **argv)
 		ret = e.status();
 	}
 	catch (exception const &e) {
-                if (writer) writer->log() << "ERROR: " << e.what();
-                else cerr << "ERROR: " << e.what() << endl;
+                LOG << "ERROR: " << e.what();
 		ret = EXIT_FAILURE;
 	}
 
@@ -272,7 +278,8 @@ jrecord_options::jrecord_options(string const &program_name)
 
         po::options_description jillopts("JILL options");
         jillopts.add_options()
-                ("server,s",  po::value<string>(&server_name), "connect to specific jack server")
+                ("server,s",  po::value<string>(&server_name)->default_value("default"),
+                 "connect to specific jack server")
                 ("name,n",    po::value<string>(&client_name)->default_value(_program_name),
                  "set client name")
                 ("in,i",      po::value<svec>(),
@@ -300,8 +307,6 @@ jrecord_options::jrecord_options(string const &program_name)
         cmd_opts.add_options()
                 ("output-file,f", po::value<string>(), "output filename");
         pos_opts.add("output-file", -1);
-
-        cfg_opts.add(jillopts).add(tropts);
         visible_opts.add(jillopts).add(tropts);
 }
 
@@ -318,12 +323,13 @@ jrecord_options::print_usage()
                   << std::endl;
 }
 
+
 void
 jrecord_options::process_options()
 {
         program_options::process_options();
         if (!assign(output_file, "output-file")) {
-                std::cerr << "Error: missing required output file name " << std::endl;
+                LOG << "ERROR: missing required output file name " << std::endl;
                 throw Exit(EXIT_FAILURE);
         }
         parse_keyvals(additional_options, "attr");

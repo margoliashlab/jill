@@ -15,7 +15,6 @@
 #include <iosfwd>
 #include <pthread.h>
 #include <boost/shared_ptr.hpp>
-#include <boost/iostreams/stream.hpp>
 #include "../data_thread.hh"
 #include "../data_writer.hh"
 
@@ -23,7 +22,7 @@ namespace jill {
 
 namespace dsp {
 
-class period_ringbuffer;
+class block_ringbuffer;
 
 /**
  * An implementation of the data thread that uses a ringbuffer to move data
@@ -39,80 +38,81 @@ public:
          * Construct new buffered data writer.
          *
          * @param writer       a pointer to a heap-allocated data_writer
-         * @param buffer_size  the initial size of the ringbuffer
+         * @param buffer_size  the initial size of the ringbuffer (in bytes)
          *
          * @note best practice is to only access @a writer through this object
          * after initialization, e.g:
          * buffered_data_writer(new concrete_data_writer(...));
          */
-        buffered_data_writer(boost::shared_ptr<data_writer> writer, nframes_t buffer_size=4096);
+        buffered_data_writer(boost::shared_ptr<data_writer> writer, std::size_t buffer_size=4096);
         virtual ~buffered_data_writer();
 
-        nframes_t push(void const * arg, period_info_t const & info);
+        void push(nframes_t time, dtype_t dtype, char const * id,
+                  std::size_t size, void const * data);
         void data_ready();
         void xrun();
+        void reset();
         void stop();
         void start();
         void join();
-
-	/// @return the number of complete periods that can be stored. wait-free
-        nframes_t write_space(nframes_t nframes) const;
 
         /**
          * Resize the ringbuffer. Only takes effect if the new size is larger
          * than the current size. The actual size may be larger due to
          * constraints on the underlying storage mechanism.
          *
-         * A 2 second buffer is good enough for most purposes. Deriving classes
-         * may override this method to provide different estimates of the
-         * appropriate buffer size.
-         *
-         * Blocks until the write thread has emptied the buffer. If data is
-         * being added to the buffer by a realtime thread this may take an
-         * extremely long time.
-         *
-         * @param nsamples   the requested capacity of the buffer (in frames)
-         * @param nchannels  the number of channels in the datastream
-         * @return the new capacity of the buffer
+         * Blocks until the write thread has emptied the buffer, so this can
+         * only be called when data are no longer being added to the buffer
+         * (i.e. in resize_buffer callback)
          */
-        virtual nframes_t resize_buffer(nframes_t nframes, nframes_t nchannels);
+        virtual std::size_t request_buffer_size(std::size_t bytes);
 
         /**
-         * Tell the disk thread to close the current entry when all the channels
-         * have been written.
+         * Bind the logger to a zeromq socket. Messages may be sent to this
+         * socket by other programs.
          *
-         * @param time   the time to close the entry (may be ignored by some implementations)
+         * @param server_name  the name of the jack server. All the clients of
+         *                     the server must log to the same socket.
+         *
+         * @note once binding is successful, subsequent calls to this function
+         *       do nothing.
          */
-        virtual void close_entry(nframes_t time);
-
-        friend std::ostream & operator<< (std::ostream &, buffered_data_writer const &);
+        void bind_logger(std::string const & server_name);
 
 protected:
         /**
          * Entry point for deriving classes to handle data pulled off the
          * ringbuffer. Deriving classes *must* release data using
          * _buffer->release() when they are done with the data or the buffer
-         * will overrun.  The default implementation simply passes the data to
-         * the data_writer::write() function.
+         * will overrun.
          *
-         * @param info   the header and data for the period. may be null if
+         * @param data   the header and data for the period. may be null if
          *               there's no data
          */
-        virtual void write(period_info_t const * info);
+        virtual void write(data_block_t const * data);
 
-        static void * thread(void * arg);           // the thread entry point
+        /**
+         * Collect log messages from the zmq socket and write them. Call this
+         * when load is low.
+         */
+        void write_messages();
 
-        pthread_mutex_t _lock;                     // mutex for condition variable
-        pthread_cond_t  _ready;                    // indicates data ready
-        bool _xrun;                                 // xrun flag
-        bool _entry_close;                          // close entry flag
+        state_t _state;                            // thread state
+        bool _reset;                               // flag to reset stream
 
         boost::shared_ptr<data_writer> _writer;            // output
-        boost::shared_ptr<period_ringbuffer> _buffer;      // ringbuffer
+        boost::shared_ptr<block_ringbuffer> _buffer;      // ringbuffer
 
 private:
+        pthread_mutex_t _lock;                     // mutex for condition variable
+        pthread_cond_t  _ready;                    // indicates data ready
+        static void * thread(void * arg);           // the thread entry point
         pthread_t _thread_id;                      // thread id
-        bool _stop;                                 // stop flag
+        bool _xrun;                                // flag to indicate xrun
+        // variables for receiving incoming messages
+        void * _context;
+        void * _socket;
+        bool _logger_bound;
 
 };
 
