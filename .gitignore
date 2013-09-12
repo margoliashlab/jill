@@ -12,3 +12,8 @@ core*
 /modules/jrecord
 /modules/jstim
 /modules/jevent_click
+dummy
+/modules/jmonitor
+/modules/filter
+/test/test_zmq_server
+/modules/jfilter
