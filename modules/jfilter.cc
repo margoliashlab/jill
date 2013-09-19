@@ -1,6 +1,8 @@
 #include <iostream>
 #include <signal.h>
 #include <boost/shared_ptr.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/function.hpp>
 #include <sstream>
 
 #include "../jill/logging.hh"
@@ -9,9 +11,11 @@
 
 #define PROGRAM_NAME "jfilter"
 
+
 using namespace jill;
 using std::string;
 typedef std::vector<string> svec;
+typedef jack_client::port_list_type plist_t;
 
 class jfilter_options : public program_options {
 
@@ -25,79 +29,88 @@ public:
         svec input_ports;
         svec output_ports;
   
+
         int nports;
-        float cutoff_frequency;
+        // float cutoff_frequency;
+
+        std::vector<float> numerator;
+        std::vector<float> denominator;
+        
   
 
 protected:
         virtual void print_usage();
 };
   
+
+static const int MaxBufferSize = 10000;
+static const int PadLength = 2;
+
 static jfilter_options options(PROGRAM_NAME);
 static boost::shared_ptr<jack_client> client;
-//jack_port_t *port_in, *port_out;
+static plist_t ports_in, ports_out;
 static int ret = EXIT_SUCCESS;
 static int running = 1;
+
+static sample_t *x, *y;
+
+
+// default numerator filter coefficients stored in vector b
+sample_t  numerator_array[] = {0.063713475989648, 0.0, -0.127426951979296, 0.0, 0.063713475989648};
+static std::vector<sample_t> b(numerator_array, numerator_array + sizeof(numerator_array)/sizeof(sample_t) ); 
+
+// default filter coefficients stored in vector a
+sample_t denominator_array[] =  {1.0, -3.148598245944364, 3.730068744095790, -2.006303752961768, 0.424952625169780};
+static std::vector<sample_t> a(denominator_array, denominator_array + sizeof(denominator_array)/sizeof(sample_t) );
 
 void
 filter(sample_t const * input, sample_t * output, nframes_t nframes)
 {
 
-        // static nframes_t x; 
 
-        // // Numerator filter coefficients 
-        // sample_t b[] = {0.292893218813453, -0.585786437626905, .292893218813453};
-        // // Denominator filter coefficients
-        // sample_t a[] = {1.000000000000000,  0.0, 0.171572875253810};                               
+                             
 
-        // /*copying the end of input and output from the previous buffer to 
-        //   the beginning of the input and output arrays */
+        /*copying the end of input and output from the previous buffer to 
+          the beginning of the input and output arrays */
   
-        // memcpy(x, x + nframes, PAD_LENGTH * sizeof(sample_t));
-        // memcpy(y, y + nframes, PAD_LENGTH * sizeof(sample_t));
+        memcpy(x, x + nframes, PadLength * sizeof(sample_t));
+        memcpy(y, y + nframes, PadLength * sizeof(sample_t));
 
-        // /*setting the rest of the output array to 0 */
-        // memset(y + PAD_LENGTH, (sample_t ) 0, (nframes + PAD_LENGTH) * sizeof(sample_t));
+        /*setting the rest of the output array to 0 */
+        memset(y + PadLength, (sample_t ) 0, (nframes + PadLength) * sizeof(sample_t));
 
-        // /*copying new buffer to input array*/
-        // memcpy(x + PAD_LENGTH, input, nframes * sizeof(sample_t));
+        /*copying new buffer to input array*/
+        memcpy(x + PadLength, input, nframes * sizeof(sample_t));
   
-        // int i,n;
-        // for (n = PAD_LENGTH; n < nframes + PAD_LENGTH; n++) {
-        //         for (i = 0; i < FILTER_LENGTH; i++) {
-        //                 y[n] +=  (b[i] *  x[n-i]) - (a[i] * y[n-i]);      
-        //         }
-        // }
+        int i,n;
+        for (n = PadLength; n < nframes + PadLength; n++) {
+                for (i = 0; i < PadLength + 1; i++) {
+                        y[n] +=  (b[i] *  x[n-i]) - (a[i] * y[n-i]);      
+                }
+        }
 
-        // /* copying filtered signal to output  */
-        // memcpy(output, y + PAD_LENGTH, nframes*sizeof(sample_t)); 
-
+        // copying filtered signal to output
+        memcpy(output, y + PadLength, nframes*sizeof(sample_t)); 
+        //memcpy(output, input, nframes*sizeof(sample_t));
 }
 
 
 int 
-process (jack_nframes_t nframes, void *arg)
+process (jack_client *client, nframes_t nframes, nframes_t)
 {
 
-//   sample_t *in, *out;
+  sample_t *in, *out;
   
-//   in = jack_port_get_buffer (input_port, nframes );
-//   out = jack_port_get_buffer (output_port, nframes );
-
-//   filter(in, out, nframes);
-
-//   //printf("%8.5f \t %8.5f \n", in[0], out[0]); 
+  plist_t::const_iterator it_out = ports_out.begin();
+  for (plist_t::const_iterator it_in = ports_in.begin(); it_in != ports_in.end(); it_in++) { 
+  	  if (in == 0) continue;
+  	  in = client->samples(*it_in, nframes);	  
+  	  out = client->samples(*it_out, nframes);
+  	  filter(in, out, nframes);
+  	  it_out++;
+  }
   
-//   return 0;      
-}
-
-
-//static jack_client client("filter");
-
-void
-jack_shutdown()
-{
-  
+  return 0;      
 }
 
 
@@ -121,6 +134,25 @@ jack_latency (jack_latency_callback_mode_t mode, void *arg)
 int
 jack_bufsize(jack_client *client, nframes_t nframes)
 {
+
+        // sample_t xpad[PadLength];
+        // sample_t ypad[PadLength];
+  
+        // /* saves state of filter */
+        // int old_buffer_size = sizeof(x)/sizeof(sample_t) - PadLength;
+        // memcpy(xpad, x + old_buffer_size, PadLength * sizeof(sample_t));
+        // memcpy(ypad, y + old_buffer_size, PadLength * sizeof(sample_t));
+
+        // /*reallocates memory for pointers x and y to account for changes in buffer size */
+        // realloc(x, (PadLength + nframes) * sizeof(sample_t));
+        // realloc(y, (PadLength + nframes) * sizeof(sample_t));
+  
+        // /* copies state of filter back to x and y */
+        // memcpy(x + nframes, xpad, PadLength * sizeof(sample_t));
+        // memcpy(y + nframes, ypad, PadLength * sizeof(sample_t)); 
+  
+
+        // printf("Buffer size changed to %d samples", nframes);
         return 0;
 }
 
@@ -129,18 +161,24 @@ jack_bufsize(jack_client *client, nframes_t nframes)
 int
 jack_xrun(jack_client *client, float delay)
 {
+        
+        std::cout << "xrun: " << delay << std::endl;
         return 0;
 }
 
 
 /** handle server shutdowns */
 void
-jack_shutdown(jack_status_t code, char const *)
+jack_shutdown(jack_status_t code, char const *msg)
 {
+        free(x);
+        free(y);
         ret = -1;
         running = 0;
 }
 
+// jack_client::ShutdownCallback shutdown_callback = &jack_shutdown;
+//shutdown_callback = &jack_shutdown;
 
 /** handle POSIX signals */
 void
@@ -152,20 +190,21 @@ signal_handler(int sig)
 
 
 
-void 
+plist_t 
 create_ports(int nports, string const & base_name, string const & type,
                              unsigned long flags, unsigned long buffer_size=0) {
-        using std::stringstream;        
+        
+	plist_t ports;
+	using std::stringstream;        
         stringstream stream_idx;       
-        string string_idx;
         string port_name;
         for (int i = 1; i <= nports; ++i) {
                 stream_idx << i;
-                string_idx = stream_idx.str();	      
-                port_name = base_name + string_idx;
-                client->register_port(port_name, type,flags, buffer_size);
+                port_name = base_name + stream_idx.str();
+		ports.push_back(client->register_port(port_name, type, flags, buffer_size));
                 stream_idx.str("");             
         }
+	return ports;
 }
 
 
@@ -180,48 +219,61 @@ main(int argc, char **argv)
                 // parse options
 		options.parse(argc,argv);
 
+                if (options.count("numerator") && options.count("denominator") ) {
+                        b = options.numerator;
+                        a = options.denominator;
+                                
+                }
+
+
                 // start client
                 client.reset(new jack_client(options.client_name, options.server_name));
 
 
                 // register input ports
-                create_ports(options.nports, "in_", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput);
+                ports_in = create_ports(options.nports, "in_", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
                
                
                 // register output ports 
-                create_ports(options.nports, "out_", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput);
-                
+                ports_out = create_ports(options.nports, "out_", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+		
                                         
                 
        
                 // register signal handlers
 		signal(SIGINT,  signal_handler);
-		signal(SIGTERM, signal_handler);
+                signal(SIGTERM, signal_handler);
 		signal(SIGHUP,  signal_handler);
 
                 // register jack callbacks
-                // client->set_shutdown_callback(jack_shutdown);
-                // client->set_xrun_callback(jack_xrun);
-                // client->set_process_callback(process);
+                client->set_shutdown_callback(jack_shutdown);
+                client->set_xrun_callback(jack_xrun);
+                client->set_process_callback(process);
 
                 // uncomment if you need these callbacks
                 // client->set_buffer_size_callback(jack_bufsize);
                 // jack_set_latency_callback (client->client(), jack_latency, 0);
 
+		
                 // activate client
                 client->activate();
-         
+	       nframes_t buffer_size = client->buffer_size();
+                
+		x = (sample_t *) calloc(MaxBufferSize, sizeof(sample_t));
+		y = (sample_t *) calloc(MaxBufferSize, sizeof(sample_t));
 
                 // connect ports
-                if (options.count("in")) {
-                        svec const & portlist = options.vmap["in"].as<svec>();
-                        client->connect_ports(portlist.begin(), portlist.end(), "in");
-                }
-                if (options.count("out")) {
-                        svec const & portlist = options.vmap["out"].as<svec>();
-                        client->connect_ports("out", portlist.begin(), portlist.end());
-                }
+                // if (options.count("in")) {
+                //          svec const & portlist = options.vmap["in"].as<svec>();
+                //         client->connect_ports(portlist.begin(), portlist.end(), "in");
+                // }
+                // if (options.count("out")) {
+                //         svec const & portlist = options.vmap["out"].as<svec>();
+                //         client->connect_ports("out", portlist.begin(), portlist.end());
+                // }
 
+                //client->connect_port("system:capture_1", "in_1");
+                //client->connect_port("out_1", "system:playback_1");
                 while (running) {
                         usleep(100000);
                 }
@@ -266,8 +318,14 @@ jfilter_options::jfilter_options(string const &program_name)
         options.nports =  max(options.nports, max(options.count("in"), options.count("out"))); 
         po::options_description opts("Filter options");
         opts.add_options()
-                ("cutoff-frequency, f", po::value<float>(&cutoff_frequency)->default_value(100), 
-                 "set cutoff frequency");
+                ("numerator,b",   po::value<vector<float> >(&numerator)->multitoken(), 
+                 "set numerator coefficients of filter. Unless both numerator and denominator filter coefficients are given as arguments, the default filter will be a 2nd order butterworth filter with pass band between 100 Hz and 3000 Hz, for a sampling rate of 30 kHz")
+                ("denominator,a", po::value<vector<float> >(&denominator)->multitoken(), 
+                 "set denominator coefficients of filter");
+               
+                // ("cutoff-frequency, f", po::value<float>(&cutoff_frequency)->default_value(100), 
+                //  "set cutoff frequency")
+
 
         cmd_opts.add(jillopts).add(opts);
         visible_opts.add(jillopts).add(opts);
