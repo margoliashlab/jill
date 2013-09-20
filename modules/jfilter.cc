@@ -44,11 +44,11 @@ protected:
   
 
 static const int MaxBufferSize = 10000;
-static const int PadLength = 2;
+
 
 static jfilter_options options(PROGRAM_NAME);
 static boost::shared_ptr<jack_client> client;
-static plist_t ports_in, ports_out;
+static svec ports_in, ports_out;
 static int ret = EXIT_SUCCESS;
 static int running = 1;
 
@@ -70,9 +70,14 @@ filter(sample_t const * input, sample_t * output, nframes_t nframes)
 
                              
 
-        /*copying the end of input and output from the previous buffer to 
-          the beginning of the input and output arrays */
+      
   
+        static const int PadLength = a.size() - 1;
+        
+
+        /*copying the end of input and output from the previous buffer to 
+        the beginning of the input and output arrays */
+
         memcpy(x, x + nframes, PadLength * sizeof(sample_t));
         memcpy(y, y + nframes, PadLength * sizeof(sample_t));
 
@@ -101,10 +106,10 @@ process (jack_client *client, nframes_t nframes, nframes_t)
 
   sample_t *in, *out;
   
-  plist_t::const_iterator it_out = ports_out.begin();
-  for (plist_t::const_iterator it_in = ports_in.begin(); it_in != ports_in.end(); it_in++) { 
-  	  if (in == 0) continue;
+  svec::const_iterator it_out = ports_out.begin();
+  for (svec::const_iterator it_in = ports_in.begin(); it_in != ports_in.end(); it_in++) { 
   	  in = client->samples(*it_in, nframes);	  
+          if (in == 0) continue;
   	  out = client->samples(*it_out, nframes);
   	  filter(in, out, nframes);
   	  it_out++;
@@ -190,21 +195,23 @@ signal_handler(int sig)
 
 
 
-plist_t 
+svec 
 create_ports(int nports, string const & base_name, string const & type,
                              unsigned long flags, unsigned long buffer_size=0) {
         
-	plist_t ports;
+	svec port_names;
 	using std::stringstream;        
         stringstream stream_idx;       
-        string port_name;
-        for (int i = 1; i <= nports; ++i) {
-                stream_idx << i;
-                port_name = base_name + stream_idx.str();
-		ports.push_back(client->register_port(port_name, type, flags, buffer_size));
+        std::string port_string;
+
+        for (int i = 0; i <= nports; ++i) {
+                stream_idx << i + 1;
+                port_string = base_name + stream_idx.str();  
+		client->register_port(port_string, type, flags, buffer_size);
+                port_names.push_back(port_string);
                 stream_idx.str("");             
         }
-	return ports;
+	return port_names;
 }
 
 
@@ -257,23 +264,63 @@ main(int argc, char **argv)
 		
                 // activate client
                 client->activate();
-	       nframes_t buffer_size = client->buffer_size();
+                nframes_t buffer_size = client->buffer_size();
                 
 		x = (sample_t *) calloc(MaxBufferSize, sizeof(sample_t));
 		y = (sample_t *) calloc(MaxBufferSize, sizeof(sample_t));
 
-                // connect ports
-                // if (options.count("in")) {
-                //          svec const & portlist = options.vmap["in"].as<svec>();
-                //         client->connect_ports(portlist.begin(), portlist.end(), "in");
-                // }
-                // if (options.count("out")) {
-                //         svec const & portlist = options.vmap["out"].as<svec>();
-                //         client->connect_ports("out", portlist.begin(), portlist.end());
-                // }
+             
+                if (options.count("in")) {
+                        svec::const_iterator it_port = ports_in.begin();
+                        svec const & in_connections = options.vmap["in"].as<svec>();                        
+                        for (svec::const_iterator it_connect = in_connections.begin(); 
+                             it_connect != in_connections.end(); it_connect++) {
 
-                //client->connect_port("system:capture_1", "in_1");
-                //client->connect_port("out_1", "system:playback_1");
+                                jack_port_t *p = client->get_port(*it_connect);                               
+                                if (p==0) {
+                                        LOG << "error registering port: source port \""
+                                        << *it_connect << "\" does not exist";
+                                        throw Exit(-1);
+                                }
+                                else if (!(jack_port_flags(p) & JackPortIsOutput)) {
+                                        LOG << "error registering port: source port \""
+                                            << *it_connect << "\" is not an output port";
+                                        throw Exit(-1);
+                                }
+                                else {
+                                client->connect_port(*it_connect, *it_port);
+                        
+                                }
+                                it_port++;        
+                        }
+                }
+
+                if (options.count("out")) {
+                        svec::const_iterator it_port = ports_out.begin();
+                        svec const & out_connections = options.vmap["out"].as<svec>();                        
+                        for (svec::const_iterator it_connect = out_connections.begin(); 
+                             it_connect != out_connections.end(); it_connect++) {
+
+                                jack_port_t *p = client->get_port(*it_connect);                               
+                                if (p==0) {
+                                        LOG << "error registering port: destination port \""
+                                        << *it_connect << "\" does not exist";
+                                        throw Exit(-1);
+                                }
+                                else if (!(jack_port_flags(p) & JackPortIsInput)) {
+                                        LOG << "error registering port: destination port \""
+                                            << *it_connect << "\" is not an input port";
+                                        throw Exit(-1);
+                                }
+                                else {
+                                        client->connect_port(*it_port, *it_connect);
+                        
+                                }
+                                it_port++;        
+                        }
+                }
+
+
                 while (running) {
                         usleep(100000);
                 }
