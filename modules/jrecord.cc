@@ -131,7 +131,9 @@ jack_portcon(jack_client *client, jack_port_t* port1, jack_port_t* port2, int co
                 INFO << "last input to trigger port disconnected";
                 // may not satisfy condition that a complete period was written
                 // by the consumer thread
-                arf_thread->reset();
+                
+                //FIXME causes bug during triggered recording:
+                //arf_thread->reset();
         }
 }
 
