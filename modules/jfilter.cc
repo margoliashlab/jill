@@ -5,6 +5,7 @@
 #include <boost/function.hpp>
 #include <sstream>
 
+#include "../jill/digital_filter.hh"
 #include "../jill/logging.hh"
 #include "../jill/jack_client.hh"
 #include "../jill/program_options.hh"
