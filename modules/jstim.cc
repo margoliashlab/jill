@@ -13,6 +13,7 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/ptr_container/ptr_vector.hpp>
+#include <algorithm>
 
 #include "jill/logging.hh"
 #include "jill/jack_client.hh"
@@ -40,6 +41,7 @@ public:
         std::vector<string> trigout_ports;
         midi::data_type trigout_chan;
 	std::vector<string> trigin_ports;
+        std::vector<string> pulse_ports;
 
         std::vector<string> stimuli; // this is postprocessed
 
@@ -48,6 +50,9 @@ public:
         float min_interval_sec; // min interval btw starts, in sec
         nframes_t min_gap;
         nframes_t min_interval;
+
+      
+        
 
 protected:
 
@@ -61,7 +66,12 @@ boost::shared_ptr<jack_client> client;
 boost::shared_ptr<util::readahead_stimqueue> queue;
 boost::ptr_vector<stimulus_t> _stimuli;
 std::vector<stimulus_t *> _stimlist;
-jack_port_t *port_out, *port_trigout, *port_trigin;
+jack_port_t *port_out, *port_trigout, *port_trigin, *port_pulse;
+
+static nframes_t PulseLen = 5000;
+static std::vector<sample_t> on_pulse(PulseLen, 1); 
+static std::vector<sample_t> off_pulse(PulseLen, -1);
+
 
 int xruns = 0;                  // xrun counter
 
@@ -98,6 +108,10 @@ process(jack_client *client, nframes_t nframes, nframes_t time)
         sample_t * out = client->samples(port_out, nframes);
         // zero the output buffer - somewhat inefficient but safer
         memset(out, 0, nframes * sizeof(sample_t));
+        
+        sample_t* pulse_buf = client->samples(port_pulse, nframes);                
+        if (pulse_buf) memset(pulse_buf, 0, nframes * sizeof(sample_t));
+              
 
         // the currently playing stimulus (or nullptr)
         jill::stimulus_t const * stim = queue->head();
@@ -156,12 +170,42 @@ process(jack_client *client, nframes_t nframes, nframes_t time)
         // copy samples, if there are any
         nframes_t nsamples = std::min(stim->nframes() - stim_offset, nframes - period_offset);
         DBG << "stim_offset=" << stim_offset << ", period_offset=" << period_offset << ", nsamples=" << nsamples;
+       
+
+    
+      
+        if (pulse_buf) {            
+                nframes_t off_period_offset;
+                        
+                if (stim_offset < PulseLen) {
+                        nframes_t on_nsamples = std::min(PulseLen - stim_offset, 
+                                                        nframes - period_offset);                             
+                        // std::copy(on_pulse.begin() + stim_offset, 
+                        //           on_pulse.begin() + stim_offset + on_nsamples, pulse_buf + period_offset);
+                        
+                        std::fill_n(pulse_buf + period_offset, on_nsamples, (sample_t) 1);
+                        for (nframes_t i = 0; i < on_nsamples; i++) {
+                                std::cout << pulse_buf[period_offset + i] << std::endl;
+                        }
+                }
+                else if (off_period_offset < nframes) {        
+                        off_period_offset = (stim->nframes() < (stim_offset + PulseLen))? 0 : 
+                        stim->nframes() - stim_offset - PulseLen;
+                        sample_t off_nsamples = nsamples - off_period_offset;
+                        std::fill_n(pulse_buf + off_period_offset, off_nsamples, (sample_t) -1);
+                }                
+        }
+
+        
+                                             
         if (nsamples > 0) {
                 memcpy(out + period_offset,
                        stim->buffer() + stim_offset,
                        nsamples * sizeof(sample_t));
                 stim_offset += nsamples;
         }
+       
+
         // did the stimulus end?
         if (stim_offset >= stim->nframes()) {
                 queue->release();
@@ -169,8 +213,10 @@ process(jack_client *client, nframes_t nframes, nframes_t time)
                 midi::write_message(trig, period_offset + nsamples,
                                     midi::stim_off, stim->name());
                 DBG << "playback ended: time=" << last_stop << ", stim=" << stim->name();
-                stim_offset = 0;
+                stim_offset = 0;                                
         }
+        
+        
 
         return 0;
 }
@@ -266,6 +312,8 @@ main(int argc, char **argv)
 
                 port_out = client->register_port("out", JACK_DEFAULT_AUDIO_TYPE,
                                                  JackPortIsOutput | JackPortIsTerminal, 0);
+               
+
                 port_trigout = client->register_port("trig_out",JACK_DEFAULT_MIDI_TYPE,
                                                      JackPortIsOutput | JackPortIsTerminal, 0);
                 if (options.count("trig")) {
@@ -273,7 +321,12 @@ main(int argc, char **argv)
                         port_trigin = client->register_port("trig_in",JACK_DEFAULT_MIDI_TYPE,
                                                             JackPortIsInput | JackPortIsTerminal, 0);
                 }
-
+                
+                if (options.count("pulse")) {
+                        port_pulse = client->register_port("pulse_out", JACK_DEFAULT_AUDIO_TYPE, 
+                                                           JackPortIsOutput | JackPortIsTerminal, 0);
+                }  
+ 
                 // register signal handlers
 		signal(SIGINT,  signal_handler);
 		signal(SIGTERM, signal_handler);
@@ -290,6 +343,7 @@ main(int argc, char **argv)
                 client->connect_ports("out", options.output_ports.begin(), options.output_ports.end());
                 client->connect_ports("trig_out", options.trigout_ports.begin(), options.trigout_ports.end());
                 client->connect_ports(options.trigin_ports.begin(), options.trigin_ports.end(), "trig_in");
+                client->connect_ports("pulse_out", options.pulse_ports.begin(), options.pulse_ports.end());
 
                 // wait for stimuli to finish playing
                 queue->join();
@@ -324,7 +378,9 @@ jstim_options::jstim_options(string const &program_name)
                 ("chan,c",    po::value<midi::data_type>(&trigout_chan)->default_value(0),
                  "set MIDI channel for output messages (0-16)")
                 ("trig,t",    po::value<vector<string> >(&trigin_ports)->multitoken()->zero_tokens(),
-                 "add connection to input trigger port");
+                 "add connection to input trigger port")
+                ("pulse,p", po::value<vector <string> >(&pulse_ports)->multitoken()->zero_tokens(), 
+                 "add port that emits a short pulse at the beginning and end of each stimulus, and optionally specify connection to this port");  
 
         // tropts is a group of options
         po::options_description opts("Stimulus options");
@@ -336,6 +392,7 @@ jstim_options::jstim_options(string const &program_name)
                  "minimum gap between sound (s)")
                 ("interval,i",po::value<float>(&min_interval_sec)->default_value(0.0),
                  "minimum interval between stimulus start times (s)");
+                
 
         cmd_opts.add(jillopts).add(opts);
         cmd_opts.add_options()
