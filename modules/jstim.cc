@@ -68,9 +68,7 @@ boost::ptr_vector<stimulus_t> _stimuli;
 std::vector<stimulus_t *> _stimlist;
 jack_port_t *port_out, *port_trigout, *port_trigin, *port_pulse;
 
-static nframes_t PulseLen = 5000;
-static std::vector<sample_t> on_pulse(PulseLen, 1); 
-static std::vector<sample_t> off_pulse(PulseLen, -1);
+static const nframes_t PulseLen = 10;
 
 
 int xruns = 0;                  // xrun counter
@@ -175,25 +173,24 @@ process(jack_client *client, nframes_t nframes, nframes_t time)
     
       
         if (pulse_buf) {            
-                nframes_t off_period_offset;
+                //nframes_t off_period_offset;
                         
                 if (stim_offset < PulseLen) {
                         nframes_t on_nsamples = std::min(PulseLen - stim_offset, 
                                                         nframes - period_offset);                             
-                        // std::copy(on_pulse.begin() + stim_offset, 
-                        //           on_pulse.begin() + stim_offset + on_nsamples, pulse_buf + period_offset);
                         
                         std::fill_n(pulse_buf + period_offset, on_nsamples, (sample_t) 1);
                         for (nframes_t i = 0; i < on_nsamples; i++) {
                                 std::cout << pulse_buf[period_offset + i] << std::endl;
                         }
                 }
-                else if (off_period_offset < nframes) {        
-                        off_period_offset = (stim->nframes() < (stim_offset + PulseLen))? 0 : 
-                        stim->nframes() - stim_offset - PulseLen;
-                        sample_t off_nsamples = nsamples - off_period_offset;
-                        std::fill_n(pulse_buf + off_period_offset, off_nsamples, (sample_t) -1);
-                }                
+                // else if (off_period_offset < nframes) {        
+                //         off_period_offset = (stim->nframes() < (stim_offset + PulseLen))? 0 : 
+                //         stim->nframes() - stim_offset - PulseLen;
+                //         sample_t off_nsamples = nsamples - off_period_offset;
+                //         std::fill_n(pulse_buf + off_period_offset, off_nsamples, (sample_t) -1);
+                // }     
+                
         }
 
         
