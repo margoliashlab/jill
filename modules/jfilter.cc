@@ -2,7 +2,6 @@
 #include <signal.h>
 #include <boost/shared_ptr.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/function.hpp>
 #include <boost/lambda/lambda.hpp>
 #include <sstream>
 #include <algorithm>
@@ -165,7 +164,11 @@ main(int argc, char **argv)
                 
 		options.parse(argc,argv);
 
-                
+                // start client
+                client.reset(new jack_client(options.client_name, options.server_name));
+          
+
+                // set filter coefficients
                 // TODO raise exception for incompatible arguments
                 if (options.count("numerator") && options.count("denominator") ) {
                         filter.custom_coef(options.numerator,
@@ -174,28 +177,26 @@ main(int argc, char **argv)
                 }               
                 else {
                         
-                        // vector<sample_t> Wn(options.cutoff_frequencies.size());
+                        vector<sample_t> Wn(options.cutoff_frequencies.size());
 
-                        // nframes_t 
-                        // boost::lambda::placeholder1_type X;
-                        // std::for_each(options.cutoff_frequencies.begin(), 
-                        //                options.cutoff_frequencies.end(), 
-                        //               X / );
+                        const sample_t nyquist = static_cast<sample_t>(client->sampling_rate())/2.0; 
+                        std::transform(options.cutoff_frequencies.begin(), 
+                                       options.cutoff_frequencies.end(), 
+                                       Wn.begin(),
+                                       boost::lambda::_1 / nyquist);
                         
                         filter.butter(options.order, 
-				      options.cutoff_frequencies, 		
+				      Wn, 		
 				      options.filter_type);
+                                // filter.butter(options.order,
+                        //               options.cutoff_frequencies,
+                        //               options.filter_type);
                 } 
                 
 
-                // start client
-                client.reset(new jack_client(options.client_name, options.server_name));
-
-
                 // register input ports
                 ports_in = create_ports(options.nports, "in_", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
-               
-               
+                             
 
                 // register output ports 
                 ports_out = create_ports(options.nports, "out_", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
@@ -221,7 +222,6 @@ main(int argc, char **argv)
 		
                 // activate client
                 client->activate();
-                nframes_t buffer_size = client->buffer_size();
                 
              
                 if (options.count("in")) {

@@ -41,10 +41,10 @@ public:
         
         /* Normalizes so that constant term of denominator is 1*/
         
-        void lp2lp(sample_t Wn);
-        void lp2hp(sample_t Wn);
-        void lp2bp(sample_t W1, sample_t W2);
-        void lp2bs(sample_t W1, sample_t W2);
+        void lp2lp(std::vector<sample_t> Wn);
+        void lp2hp(std::vector<sample_t> Wn);
+        void lp2bp(std::vector<sample_t> Wn);
+        void lp2bs(std::vector<sample_t> Wn);
 
         void transform_prototype(std::vector<sample_t> Wn, std::string filter_type);
         

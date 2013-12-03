@@ -1,4 +1,7 @@
 #include "transfer_function.hh"
+#include "program_options.hh"
+#include "logging.hh"
+
 
 using namespace jill;
 
@@ -108,41 +111,66 @@ transfer_function::bilinear() {
  }
 
 void
-transfer_function::lp2lp(sample_t Wn) {
+transfer_function::lp2lp(std::vector<sample_t> Wn) {
+
+
+        if (Wn.size() != 1) {
+                LOG << "ERROR: 1 cutoff frequency must be given for a low-pass filter.";
+                throw Exit(-1);
+        }                              
 
         sample_t num[2] = {0, 1};
-        sample_t denom[2] = {Wn, 0};
+        sample_t denom[2] = {Wn[0], 0};
         transform(poly(num,1), poly(denom,1));
 }
 
 
 void
-transfer_function::lp2hp(sample_t Wn) {
+transfer_function::lp2hp(std::vector<sample_t> Wn) {
 
-        sample_t num[2] = {Wn, 0};
+
+        if (Wn.size() != 1) {
+                LOG << "ERROR: 1 cutoff frequency must be given for a high-pass filter.";
+                throw Exit(-1);
+        }                        
+         
+
+        sample_t num[2] = {Wn[0], 0};
         sample_t denom[2] = {0, 1};
         transform(poly(num, 1), poly(denom, 1));       
 }
 
 void 
-transfer_function::lp2bp(sample_t W1, sample_t W2) {
+transfer_function::lp2bp(std::vector<sample_t> Wn) {
 
-        if (W1 > W2) std::swap(W1,W2);                    
+
+        if (Wn.size() != 2) {
+                LOG << "ERROR: 2 cutoff frequencies must be given for a band-pass filter.";
+                throw Exit(-1);
+        }                        
+         
+        if (Wn[0] > Wn[1]) std::reverse(Wn.begin(),Wn.end());                    
  
-        sample_t num[3] = {W1*W2, 0, 1};
-        sample_t denom[2] = {0, W2-W1};
+        sample_t num[3] = {Wn[0]*Wn[1], 0, 1};
+        sample_t denom[2] = {0, Wn[1]-Wn[0]};
         transform(poly(num, 2), poly(denom, 1));
 
 }
 
 
 void 
-transfer_function::lp2bs(sample_t W1, sample_t W2) {
+transfer_function::lp2bs(std::vector<sample_t> Wn) {
 
-        if (W1 > W2) std::swap(W1,W2);
+        if (Wn.size() != 2) {
+                LOG << "ERROR: 2 cutoff frequencies must be given for a band-stop filter.";
+                throw Exit(-1);
+        }                        
+                        
 
-        sample_t num[2] = {0, W2-W1};
-        sample_t denom[3] = {W1*W2, 0, 1}; 
+        if (Wn[0] > Wn[1]) std::reverse(Wn.begin(),Wn.end());                         
+
+        sample_t num[2] = {0, Wn[1]-Wn[0]};
+        sample_t denom[3] = {Wn[0]*Wn[1], 0, 1}; 
         transform(poly(num, 1), poly(denom, 2));
 
 }
@@ -152,15 +180,15 @@ transfer_function::transform_prototype(std::vector<sample_t> Wn,
                                        std::string filter_type) {
                                                
         if (filter_type.compare("low-pass")==0) {
-                lp2lp(Wn[0]);          
+                lp2lp(Wn);          
         }
         else if (filter_type.compare("high-pass")==0) {
-                lp2hp(Wn[0]);
+                lp2hp(Wn);
         }
         else if (filter_type.compare("band-pass")==0){
-                lp2bp(Wn[0], Wn[1]);
+                lp2bp(Wn);
         }
         else if (filter_type.compare("band-stop")==0) {
-                lp2bs(Wn[0], Wn[1]);
+                lp2bs(Wn);
         }
 }
