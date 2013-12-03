@@ -27,7 +27,6 @@ digital_filter::digital_filter(): _coef_in(std::vector<sample_t>(1,0)),
 {}
 
 
-
 void
 digital_filter::filter_buf(sample_t const * const in, sample_t * const out, 
                 std::string port_name, nframes_t nframes) {
