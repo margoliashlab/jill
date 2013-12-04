@@ -53,19 +53,21 @@ digital_filter::filter_buf(sample_t const * const in, sample_t * const out,
                 } 
  
                 for (nframes_t n = 0; n < nframes; n++) {
-                        for (nframes_t i = 0; i <= pad_len(); i++) {
+                        sample_t temp = 0;
+                        for (nframes_t i = 0; i <= pad_len(); i++) {                           
                                 if (i == 0) {
-                                        out[n] = _coef_in[i] * in[n-i];
+                                        temp = _coef_in[i] * in[n-i];
                                 }
                                 else if (i <= n) {
-                                        out[n] += _coef_in[i]*in[n-i] - _coef_out[i] * out[n-i];      
+                                        temp += _coef_in[i]*in[n-i] - _coef_out[i] * out[n-i];      
                                 }
                                 else {
-                                        out[n] += _coef_in[i] * _pads_in[port_name][n-i + pad_len()] -      
+                                        temp += _coef_in[i] * _pads_in[port_name][n-i + pad_len()] -      
                                                 _coef_out[i] * _pads_out[port_name][n-i + pad_len()];
                                 }       
                         }
-                        out[n] /= _coef_out[0];
+                        temp /= _coef_out[0];
+                        out[n]=temp;
                 }
 
                 std::copy(in + nframes-pad_len(), in + nframes, _pads_in[port_name].begin());
@@ -96,7 +98,7 @@ digital_filter::custom_coef(std::vector<sample_t> b,
                             std::vector<sample_t> a) {
         _coef_in = b;
         _coef_out = a;
-
+        log_coefs();
 }
 
 
@@ -141,20 +143,20 @@ digital_filter::_tf2coefficients(transfer_function H) {
 } 
 
 void 
-digital_filter::butter(int N, std::vector<sample_t> Wn, std::string filter_type) {
+digital_filter::butter(int N, std::vector<sample_t> Wc, std::string filter_type, nframes_t fs) {
   
         
         const complex_t i(0,1);
         const sample_t pi = arg(complex_t(-1,0));	
         
-        // vector<sample_t> Wn(options.cutoff_frequencies.size());
+        // normalized cutoff_frequencies
+        std::vector<sample_t> Wn(Wc.size());
 
-        // const sample_t nyquist = static_cast<sample_t>(client->sampling_rate())/2.0; 
-        // std::transform(options.cutoff_frequencies.begin(), 
-        //                options.cutoff_frequencies.end(), 
-        //                Wn.begin(),
-        //                boost::lambda::_1 / nyquist);
-
+        const sample_t nyquist = static_cast<sample_t>(fs)/2.0; 
+        std::transform(Wc.begin(), 
+                       Wc.end(), 
+                       Wn.begin(),
+                       boost::lambda::_1 / nyquist);
 
         //find poles
         std::vector<complex_t> p(N,complex_t(0,0));
@@ -177,10 +179,30 @@ digital_filter::butter(int N, std::vector<sample_t> Wn, std::string filter_type)
         H.bilinear();
      
         _tf2coefficients(H);       
-        LOG << "Numerator filter coefficients set to" << for_each(" " << H.num();
-        LOG << "Denominator filter coefficients set to" << " " << H.denom();
+
+        log_filter(N, Wc, filter_type, "butterworth");
 }
 
+void
+digital_filter::log_filter(int N, std::vector<sample_t> Wc, std::string filter_type, std::string filter_class){
+        
+        //printing polynomials for convenience
+        LOG << "filter class: " << filter_class;
+        LOG << "type: " << filter_type;
+        LOG << "frequency cutoff(s) (Hz): " << poly(&Wc[0], Wc.size()-1);
+        LOG << "order: " << N;        
+        
+        log_coefs();
+}
 
+void
+digital_filter::log_coefs() {
 
-
+        //printing polynomials for convenience
+        LOG << "Numerator filter coefficients set to " 
+            << poly(&_coef_in[0], _coef_in.size()-1); 
+        LOG << "Denominator filter coefficients set to " 
+            << poly(&_coef_out[0],_coef_out.size()-1);
+}        
+                
+ 
