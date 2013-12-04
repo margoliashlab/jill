@@ -39,9 +39,13 @@ public:
         
         std::vector<sample_t> coef_in() {return _coef_in;}
         std::vector<sample_t> coef_out() {return _coef_out;}
-
+        
+        void log_coefs();
+        void log_filter(int N, std::vector<sample_t> Wc, 
+                        std::string filter_type, std::string filter_class);
         void custom_coef(std::vector<sample_t>, std::vector<sample_t>);       
-        void butter(int N, std::vector<sample_t> Wn, std::string filter_type);
+        void butter(int N, std::vector<sample_t> Wn, std::string filter_type, nframes_t fs);
+
 
 protected:
                 
