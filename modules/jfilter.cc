@@ -169,35 +169,35 @@ main(int argc, char **argv)
           
 
                 // set filter coefficients
-                // TODO raise exception for incompatible arguments
-                if (options.count("numerator") && options.count("denominator") ) {
-                        filter.custom_coef(options.numerator,
-                                           options.denominator);
-                                
-                }               
-                else {
-                        
-                        vector<sample_t> Wn(options.cutoff_frequencies.size());
 
-                        const sample_t nyquist = static_cast<sample_t>(client->sampling_rate())/2.0; 
-                        std::transform(options.cutoff_frequencies.begin(), 
-                                       options.cutoff_frequencies.end(), 
-                                       Wn.begin(),
-                                       boost::lambda::_1 / nyquist);
-                        
-                        filter.butter(options.order, 
-				      Wn, 		
-				      options.filter_type);
-                                // filter.butter(options.order,
-                        //               options.cutoff_frequencies,
-                        //               options.filter_type);
+                bool butter = (options.count("order") && 
+                               options.count("cutoff-frequencies") && 
+                               options.count("type")
+                               ) && !(options.count("numerator") || options.count("denominator"));
+                bool custom =  !(options.count("order") || 
+                               options.count("cutoff-frequencies") ||
+                               options.count("type")
+                               ) && (options.count("numerator") && options.count("denominator"));
+
+                if (custom) {
+                        filter.custom_coef(options.numerator,
+                                           options.denominator);                                                     
+                }               
+                else if (butter) {
+                        filter.butter(options.order,
+                                      options.cutoff_frequencies,
+                                      options.filter_type,
+                                      client->sampling_rate());
                 } 
-                
+                else {
+                            LOG << "ERROR: missing or incompatible arguments.";
+                            throw Exit(-1);
+                }
+
 
                 // register input ports
                 ports_in = create_ports(options.nports, "in_", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
                              
-
                 // register output ports 
                 ports_out = create_ports(options.nports, "out_", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
 		
