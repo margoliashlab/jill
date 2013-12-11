@@ -16,16 +16,17 @@ public:
  
         typedef jack_default_audio_sample_t sample_t;
         typedef jack_nframes_t nframes_t;
-        typedef std::complex<sample_t> complex_t;
+        typedef double COEF_t;
+        typedef std::complex<COEF_t> complex_t;
         typedef boost::math::tools::polynomial<complex_t> complex_poly;
-        typedef boost::math::tools::polynomial<sample_t> poly;
+        typedef boost::math::tools::polynomial<COEF_t> poly;
        
         transfer_function(poly b, poly a);
         
         //constructor taking zeros, poles, and system, respectively as arguments
         transfer_function(std::vector<complex_t> z, 
                           std::vector<complex_t> p,
-                          sample_t k);
+                          COEF_t k);
 
         ~transfer_function(){}
                        
@@ -41,12 +42,12 @@ public:
         
         /* Normalizes so that constant term of denominator is 1*/
         
-        void lp2lp(std::vector<sample_t> Wn);
-        void lp2hp(std::vector<sample_t> Wn);
-        void lp2bp(std::vector<sample_t> Wn);
-        void lp2bs(std::vector<sample_t> Wn);
+        void lp2lp(std::vector<COEF_t> Wn);
+        void lp2hp(std::vector<COEF_t> Wn);
+        void lp2bp(std::vector<COEF_t> Wn);
+        void lp2bs(std::vector<COEF_t> Wn);
 
-        void transform_prototype(std::vector<sample_t> Wn, std::string filter_type);
+        void transform_prototype(std::vector<COEF_t> Wn, std::string filter_type);
         
    
 protected:

@@ -14,7 +14,7 @@ transfer_function::transfer_function(poly b, poly a) {
 
 transfer_function::transfer_function(std::vector<complex_t> z, 
                                      std::vector<complex_t> p,
-                                     sample_t k) {
+                                     COEF_t k) {
         complex_t identity[0];
         identity[0] = complex_t(1,0);
         complex_poly num(identity, 0);
@@ -35,8 +35,8 @@ transfer_function::transfer_function(std::vector<complex_t> z,
         // coefficients should now be real
         //TODO - add exception if not real or close to real
 
-        sample_t real_num[num.size()];
-        sample_t real_denom[denom.size()];
+        COEF_t real_num[num.size()];
+        COEF_t real_denom[denom.size()];
         for (int i = 0; i < std::max(num.size(), 
                                      denom.size()); i++) {
                 if (i < num.size()) {
@@ -103,15 +103,15 @@ transfer_function::bilinear() {
        
        const int n = 1; //degree of polynomials in transform 
 
-       sample_t num[n+1] = {2, -2};
-       sample_t denom[n+1] = {1, 1};
+       COEF_t num[n+1] = {2, -2};
+       COEF_t denom[n+1] = {1, 1};
        transform(poly(num,n), poly(denom,n));
 
        _is_analog_bool=false;  
  }
 
 void
-transfer_function::lp2lp(std::vector<sample_t> Wn) {
+transfer_function::lp2lp(std::vector<COEF_t> Wn) {
 
 
         if (Wn.size() != 1) {
@@ -119,14 +119,14 @@ transfer_function::lp2lp(std::vector<sample_t> Wn) {
                 throw Exit(-1);
         }                              
 
-        sample_t num[2] = {0, 1};
-        sample_t denom[2] = {Wn[0], 0};
+        COEF_t num[2] = {0, 1};
+        COEF_t denom[2] = {Wn[0], 0};
         transform(poly(num,1), poly(denom,1));
 }
 
 
 void
-transfer_function::lp2hp(std::vector<sample_t> Wn) {
+transfer_function::lp2hp(std::vector<COEF_t> Wn) {
 
 
         if (Wn.size() != 1) {
@@ -135,13 +135,13 @@ transfer_function::lp2hp(std::vector<sample_t> Wn) {
         }                        
          
 
-        sample_t num[2] = {Wn[0], 0};
-        sample_t denom[2] = {0, 1};
+        COEF_t num[2] = {Wn[0], 0};
+        COEF_t denom[2] = {0, 1};
         transform(poly(num, 1), poly(denom, 1));       
 }
 
 void 
-transfer_function::lp2bp(std::vector<sample_t> Wn) {
+transfer_function::lp2bp(std::vector<COEF_t> Wn) {
 
 
         if (Wn.size() != 2) {
@@ -151,15 +151,15 @@ transfer_function::lp2bp(std::vector<sample_t> Wn) {
          
         if (Wn[0] > Wn[1]) std::reverse(Wn.begin(),Wn.end());                    
  
-        sample_t num[3] = {Wn[0]*Wn[1], 0, 1};
-        sample_t denom[2] = {0, Wn[1]-Wn[0]};
+        COEF_t num[3] = {Wn[0]*Wn[1], 0, 1};
+        COEF_t denom[2] = {0, Wn[1]-Wn[0]};
         transform(poly(num, 2), poly(denom, 1));
 
 }
 
 
 void 
-transfer_function::lp2bs(std::vector<sample_t> Wn) {
+transfer_function::lp2bs(std::vector<COEF_t> Wn) {
 
         if (Wn.size() != 2) {
                 LOG << "ERROR: 2 cutoff frequencies must be given for a band-stop filter.";
@@ -169,14 +169,14 @@ transfer_function::lp2bs(std::vector<sample_t> Wn) {
 
         if (Wn[0] > Wn[1]) std::reverse(Wn.begin(),Wn.end());                         
 
-        sample_t num[2] = {0, Wn[1]-Wn[0]};
-        sample_t denom[3] = {Wn[0]*Wn[1], 0, 1}; 
+        COEF_t num[2] = {0, Wn[1]-Wn[0]};
+        COEF_t denom[3] = {Wn[0]*Wn[1], 0, 1}; 
         transform(poly(num, 1), poly(denom, 2));
 
 }
 
 void 
-transfer_function::transform_prototype(std::vector<sample_t> Wn, 
+transfer_function::transform_prototype(std::vector<COEF_t> Wn, 
                                        std::string filter_type) {
                                                
         if (filter_type.compare("low-pass")==0) {

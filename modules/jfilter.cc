@@ -18,6 +18,7 @@ using namespace jill;
 using std::string;
 typedef std::vector<string> svec;
 typedef jack_client::port_list_type plist_t;
+typedef digital_filter::COEF_t COEF_t;
 
 class jfilter_options : public program_options {
 
@@ -35,11 +36,11 @@ public:
 
         string filter_class;
         string filter_type;
-        std::vector<sample_t> cutoff_frequencies;
+        std::vector<COEF_t> cutoff_frequencies;
         int order;
 
-        std::vector<sample_t> numerator;
-        std::vector<float> denominator;
+        std::vector<COEF_t> numerator;
+        std::vector<COEF_t> denominator;
         
         
 
@@ -61,7 +62,7 @@ static digital_filter filter;
 
 
 int 
-process (jack_client *client, nframes_t nframes, nframes_t)
+process (jack_client *client, nframes_t nframes, nframes_t time)
 {
 
         sample_t *in, *out;
@@ -321,13 +322,13 @@ jfilter_options::jfilter_options(string const &program_name)
         options.nports =  max(options.nports, max(options.count("in"), options.count("out"))); 
         po::options_description opts("Filter options");
         opts.add_options()
-                ("numerator",   po::value<vector<sample_t> >(&numerator)->multitoken(), 
+                ("numerator",   po::value<vector<COEF_t> >(&numerator)->multitoken(), 
                  "Set custom numerator coefficients of filter.")
-                ("denominator", po::value<vector<sample_t> >(&denominator)->multitoken(), 
+                ("denominator", po::value<vector<COEF_t> >(&denominator)->multitoken(), 
                  "Set custom denominator coefficients of filter")        
                 // ("class,c", po::value<string>(&filter_class)->default_value("butterworth"), "Class of filter.  Available classes: butterworth")
                 ("type,t", po::value<string>(&filter_type)->default_value("low-pass"), "Filter type. Available types: low-pass, high-pass, band-pass, band-stop")
-                ("cutoff-frequencies,f", po::value<vector<sample_t> >(&cutoff_frequencies)->multitoken(), "Cutoff frequencies")
+                ("cutoff-frequencies,f", po::value<vector<COEF_t> >(&cutoff_frequencies)->multitoken(), "Cutoff frequencies")
                 ("order,O", po::value<int>(&order), "Filter order (number of poles).");
 
 
