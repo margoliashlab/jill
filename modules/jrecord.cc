@@ -13,6 +13,7 @@
 #include <iostream>
 #include <signal.h>
 #include <boost/shared_ptr.hpp>
+#include <string>
 
 #include "jill/logging.hh"
 #include "jill/jack_client.hh"
@@ -339,5 +340,37 @@ jrecord_options::process_options()
                 LOG << "ERROR: missing required output file name " << std::endl;
                 throw Exit(EXIT_FAILURE);
         }
+        
         parse_keyvals(additional_options, "attr");
+        
+        // required additional attributes which will be asked for if
+        // not given initially
+        const char* c_strings[] = {"bird", "experimenter"};
+        svec required(c_strings, c_strings+sizeof(c_strings)/sizeof(c_strings[0]));
+
+        svec missing; //missing required arguments
+
+        for (svec::const_iterator req_it = required.begin();  
+             req_it != required.end();
+             req_it++) {
+            bool is_missing = true;
+            for (std::map<string,string>::const_iterator arg_it = additional_options.begin();
+                 arg_it != additional_options.end();
+                 arg_it++) {
+                
+                if (req_it->compare(arg_it->first) == 0) 
+                    is_missing = false;
+            }
+            if (is_missing)
+                missing.push_back(*req_it);
+        }
+        for (svec::const_iterator it = missing.begin(); 
+             it != missing.end();
+             it++) {
+            string new_option;
+            std::cout << "Please enter required attribute \"" << *it << "\":";
+            std::getline(std::cin, new_option);
+            additional_options[*it] = new_option;
+        }
+        
 }
