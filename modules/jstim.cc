@@ -71,7 +71,7 @@ jack_port_t *port_out, *port_trigout, *port_trigin, *port_pulse;
 static const nframes_t PulseLen = 10;
 
 
-int xruns = 0;                  // xrun counter
+static int xruns = 0;                  // xrun counter
 
 /**
  * The realtime process loop for jstim. The logic is complicated. The process
@@ -153,7 +153,8 @@ process(jack_client *client, nframes_t nframes, nframes_t time)
                 nframes_t dstop = time - last_stop;
                 // Then, check whether the deltas are longer than the required
                 // intervals, and if not, by how many samples are they short.
-                nframes_t ostart = (dstart > options.min_interval) ? 0 : options.min_interval - dstart;
+                nframes_t ostart = (dstart > options.min_interval) ?
+                        0 : options.min_interval - dstart;
                 nframes_t ostop = (dstop > options.min_gap) ? 0 : options.min_gap - dstop;
                 // The start time may occur some time during this period
                 period_offset = std::max(ostart, ostop);
@@ -201,8 +202,6 @@ process(jack_client *client, nframes_t nframes, nframes_t time)
                        nsamples * sizeof(sample_t));
                 stim_offset += nsamples;
         }
-       
-
         // did the stimulus end?
         if (stim_offset >= stim->nframes()) {
                 queue->release();
@@ -210,10 +209,8 @@ process(jack_client *client, nframes_t nframes, nframes_t time)
                 midi::write_message(trig, period_offset + nsamples,
                                     midi::stim_off, stim->name());
                 DBG << "playback ended: time=" << last_stop << ", stim=" << stim->name();
-                stim_offset = 0;                                
+                stim_offset = 0;
         }
-        
-        
 
         return 0;
 }
@@ -228,6 +225,8 @@ jack_xrun(jack_client *client, float delay)
 int
 jack_bufsize(jack_client *client, nframes_t nframes)
 {
+        // we use the xruns counter to notify the process thread that an
+        // interruption in the audio stream has occurred
         __sync_add_and_fetch(&xruns, 1); // gcc specific
         return 0;
 }
@@ -309,14 +308,13 @@ main(int argc, char **argv)
 
                 port_out = client->register_port("out", JACK_DEFAULT_AUDIO_TYPE,
                                                  JackPortIsOutput | JackPortIsTerminal, 0);
-               
-
                 port_trigout = client->register_port("trig_out",JACK_DEFAULT_MIDI_TYPE,
                                                      JackPortIsOutput | JackPortIsTerminal, 0);
                 if (options.count("trig")) {
                         LOG << "triggering playback from trig_in";
-                        port_trigin = client->register_port("trig_in",JACK_DEFAULT_MIDI_TYPE,
-                                                            JackPortIsInput | JackPortIsTerminal, 0);
+                        port_trigin = client->register_port("trig_in", JACK_DEFAULT_MIDI_TYPE,
+                                                            JackPortIsInput | JackPortIsTerminal,
+                                                            0);
                 }
                 
                 if (options.count("pulse")) {
@@ -344,6 +342,8 @@ main(int argc, char **argv)
 
                 // wait for stimuli to finish playing
                 queue->join();
+                // wait for midi buffers to clear
+                sleep(1);
                 client->deactivate();
 
 		return EXIT_SUCCESS;
@@ -370,8 +370,10 @@ jstim_options::jstim_options(string const &program_name)
                 ("server,s",  po::value<string>(&server_name), "connect to specific jack server")
                 ("name,n",    po::value<string>(&client_name)->default_value(_program_name),
                  "set client name")
-                ("out,o",     po::value<vector<string> >(&output_ports), "add connection to output audio port")
-                ("event,e",   po::value<vector<string> >(&trigout_ports), "add connection to output event port")
+                ("out,o",     po::value<vector<string> >(&output_ports),
+                 "add connection to output audio port")
+                ("event,e",   po::value<vector<string> >(&trigout_ports),
+                 "add connection to output event port")
                 ("chan,c",    po::value<midi::data_type>(&trigout_chan)->default_value(0),
                  "set MIDI channel for output messages (0-16)")
                 ("trig,t",    po::value<vector<string> >(&trigin_ports)->multitoken()->zero_tokens(),
@@ -389,7 +391,6 @@ jstim_options::jstim_options(string const &program_name)
                  "minimum gap between sound (s)")
                 ("interval,i",po::value<float>(&min_interval_sec)->default_value(0.0),
                  "minimum interval between stimulus start times (s)");
-                
 
         cmd_opts.add(jillopts).add(opts);
         cmd_opts.add_options()
