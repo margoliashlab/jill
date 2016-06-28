@@ -206,7 +206,7 @@ buffered_data_writer::write_messages()
         if (!_logger_bound) return;
         for (int i = 0; i < max_messages; ++i) {
                 // expect a three-part message: source, timestamp, message
-                more_t more = 1;
+                int64_t more = 1;
                 size_t more_size = sizeof(more);
                 std::vector<zmq::msg_ptr_t> messages;
                 while (more) {

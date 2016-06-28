@@ -80,6 +80,11 @@ if int(debug):
 else:
     env.Append(CCFLAGS=['-O2','-DNDEBUG'])
 
+env.Append(LIBPATH = ["/usr/local/lib", "/usr/lib",
+              "/usr/lib/x86_64-linux-gnu/hdf5/serial/"],
+            CPPPATH = ["/usr/local/include",
+               "/usr/include/hdf5/serial/"])
+
 lib = SConscript('jill/SConscript', exports='env libname')
 SConscript('modules/SConscript', exports='env lib')
 SConscript('test/SConscript', exports='env lib')
