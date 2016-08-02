@@ -30,7 +30,7 @@ AddOption('--libdir',
           metavar='DIR',
           help='library installation')
 # debug flags for compliation
-debug = ARGUMENTS.get('debug',1)
+debug = ARGUMENTS.get('debug', 0)
 
 if not GetOption('prefix')==None:
     install_prefix = GetOption('prefix')
@@ -79,6 +79,11 @@ if int(debug):
     env.Append(CCFLAGS=['-g2', '-Wall','-DDEBUG=%s' % debug])
 else:
     env.Append(CCFLAGS=['-O2','-DNDEBUG'])
+
+env.Append(LIBPATH = ["/usr/local/lib", "/usr/lib",
+              "/usr/lib/x86_64-linux-gnu/hdf5/serial/"],
+            CPPPATH = ["/usr/local/include",
+               "/usr/include/hdf5/serial/"])
 
 lib = SConscript('jill/SConscript', exports='env libname')
 SConscript('modules/SConscript', exports='env lib')
