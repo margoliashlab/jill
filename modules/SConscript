@@ -18,7 +18,10 @@ programs = {'jdelay' : ['jdelay.cc'],
             'jrecord' : ['jrecord.cc'],
             'jclicker' : ['jclicker.cc'],
             'jmonitor' : ['monitor_client.c'],
-            'jfilter' : ['jfilter.cc']
+	     'jfilter' : ['jfilter.cc'],
+	    'jtest' : ['jtest.cc'],
+	    'print_input_signal' : ['print_input_signal.cc'],
+	    'jrandom_X_minus_1':['jrandom_X_minus_1.cc'],
             }
 
 out = []
