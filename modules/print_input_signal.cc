@@ -23,16 +23,16 @@
 #include "jill/jack_client.hh"
 #include "jill/program_options.hh"
 
-#define PROGRAM_NAME "jtest"
+#define PROGRAM_NAME "print_input_signal"
 
 using namespace jill;
 using std::string;
 typedef std::vector<string> stringvec;
 
-class jtest_options : public program_options {
+class print_input_signal_options : public program_options {
 
 public:
-	jtest_options(string const &program_name);
+	print_input_signal_options(string const &program_name);
 
 	/** The server name */
 	string server_name;
@@ -43,11 +43,11 @@ protected:
 
 	virtual void print_usage();
 
-}; // jtest_options
+}; // print_input_signal_options
 
-static jtest_options options(PROGRAM_NAME);
+static print_input_signal_options options(PROGRAM_NAME);
 static boost::shared_ptr<jack_client> client;
-jack_port_t *port_in, *port_out;
+jack_port_t *port_in;
 static int ret = EXIT_SUCCESS;
 
 
@@ -56,19 +56,12 @@ static int running = 1;
 int
 process(jack_client *client, nframes_t nframes, nframes_t)
 {
-	sample_t *out = client->samples(port_out, nframes);
-	for(nframes_t i = 0; i < nframes;i++){
-		out[i] = 1;
-		//std::cout<<out[i]<<" ";
+	sample_t *in = client->samples(port_in, nframes);
+	
+	for(int i=0;i<nframes;i++){
+		std::cout<<in[i]<<" ";
 	}
-        return 0;
-}
-
-
-/** handle changes to buffer size */
-int
-jack_bufsize(jack_client *client, nframes_t nframes)
-{
+	
         return 0;
 }
 
@@ -112,9 +105,9 @@ main(int argc, char **argv)
                 client.reset(new jack_client(options.client_name, options.server_name));
 
                 // register ports
-                port_out = client->register_port("out", JACK_DEFAULT_AUDIO_TYPE,
-                                                 JackPortIsOutput, 0);
-		
+                port_in = client->register_port("in",JACK_DEFAULT_AUDIO_TYPE,
+                                                JackPortIsInput, 0);
+
                 // register signal handlers
 		signal(SIGINT,  signal_handler);
 		signal(SIGTERM, signal_handler);
@@ -122,7 +115,6 @@ main(int argc, char **argv)
 
                 // register jack callbacks
                 client->set_shutdown_callback(jack_shutdown);
-                //client->set_xrun_callback(jack_xrun);
                 client->set_process_callback(process);
 
 		
@@ -158,7 +150,7 @@ main(int argc, char **argv)
 
 
 /** configure commandline options */
-jtest_options::jtest_options(string const &program_name)
+print_input_signal_options::print_input_signal_options(string const &program_name)
         : program_options(program_name)
 {
 
@@ -173,18 +165,18 @@ jtest_options::jtest_options(string const &program_name)
                 ("out,o",     po::value<stringvec>(), "add connection to output port");
         cmd_opts.add(jillopts);
         visible_opts.add(jillopts);
+
 }
 
 
 /** provide the user with some information about the ports */
 void
-jtest_options::print_usage()
+print_input_signal_options::print_usage()
 {
         std::cout << "Usage: " << _program_name << " [options]\n"
                   << visible_opts << std::endl
                   << "Ports:\n"
                   << " * in:        input port\n"
-                  << " * out:       output port\n"
                   << std::endl;
 }
 
