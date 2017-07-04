@@ -18,7 +18,7 @@ programs = {'jdelay' : ['jdelay.cc'],
             'jrecord' : ['jrecord.cc'],
             'jclicker' : ['jclicker.cc'],
             'jmonitor' : ['monitor_client.c'],
-            'jfilter' : ['jfilter.cc']
+	    'jtest' : ['jtest.cc'],
             }
 
 out = []
