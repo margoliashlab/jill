@@ -76,7 +76,7 @@ if system=='Darwin':
     env.Append(CPPPATH=['/opt/local/include'],
                LIBPATH=['/opt/local/lib'])
 if int(debug):
-    env.Append(CCFLAGS=['-g2', '-Wall','-DDEBUG=%s' % debug])
+    env.Append(CCFLAGS=['-g2','-Wall','-DDEBUG=%s' % debug])
 else:
     env.Append(CCFLAGS=['-O2','-DNDEBUG'])
 

@@ -511,3 +511,16 @@ A brief summary of the MIDI specification is available at
 http://www.srm.com/qtma/davidsmidispec.html.
 
 
+** jflip
+
+The function of *jflip* is to generate white noises from input by randomly flipping 
+the audiotory signals. The overall waveform is kept but frequency information totally
+discrupted. 
+
+*** JACK Ports                                                       :rel2_0:
+
++ in :: sampled data, input. The signal is processed to generate white noise.
++ out :: processed data, output. The overall waveform is kept almost the same, but 
+frequency info are disrupted.
+
+The client will not make any changes to its port configuration during operation.
