@@ -202,7 +202,7 @@ modname_options::modname_options(string const &program_name)
                 ("in,i",      po::value<stringvec>(), "add connection to input port")
                 ("out,o",     po::value<stringvec>(), "add connection to output port");
         cmd_opts.add(jillopts);
-        // cfg_opts.add(jillopts);
+        cfg_opts.add(jillopts);
         visible_opts.add(jillopts);
 
 
