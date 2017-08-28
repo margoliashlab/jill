@@ -214,6 +214,22 @@ events and their times will be logged. The client may accept input during
 operation to adjust these parameters, and it may provide information on the
 terminal as to the current state of the detector.
 
+** jflip
+
+The function of *jflip* is to whiten the input data by randomly inverting it around
+zero. The signal's envelope is largely unchanged, but frequency information is
+discarded.
+
+Input signals which are not centered around zero are not transformed correctly.
+
+*** JACK Ports                                                       :rel2_0:
+
++ in :: sampled data, input. The signal is processed to generate white noise.
++ out :: processed data, output. The overall waveform is kept almost the same, but 
+frequency info are disrupted.
+
+The client will not make any changes to its port configuration during operation.
+
 ** jrecord
 
 The function of *jrecord* is to write sampled and event data to disk. Sampled data
@@ -509,5 +525,3 @@ The following hardware-incompatible message types are defined for JILL modules:
 
 A brief summary of the MIDI specification is available at
 http://www.srm.com/qtma/davidsmidispec.html.
-
-

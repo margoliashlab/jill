@@ -2,12 +2,15 @@
 *.arf
 core*
 .sconsign.dblite
+.DS_Store
 /arf
 /attic
 /resources
 /test_wav
 /modules/jchirp
 /modules/jdelay
+/modules/jflip
+/modules/jclicker
 /modules/jdetect
 /modules/jrecord
 /modules/jstim
