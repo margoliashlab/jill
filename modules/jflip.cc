@@ -1,5 +1,5 @@
 /*
- * jflip - whiten the input data by randomly inverting it around
+ * jflip - whiten the input data by randomly inverting it around zero.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
