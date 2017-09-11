@@ -108,11 +108,14 @@ digital_filter::custom_coef(std::vector<COEF_t> b,
 
 void 
 digital_filter::reset_pads() {
+        
         std::map<std::string, std::vector<COEF_t> >::iterator it_in, it_out;
         if (is_iir()) {
                 it_out = _pads_out.begin();
         }
-        for (it_in = _pads_in.begin(); it_in != _pads_out.end(); it_in++) {
+        
+        // fix the bug in the for loop
+        for (it_in = _pads_in.begin(); it_in != _pads_in.end(); it_in++) {
                 it_in->second.assign(it_in->second.size(), 0);
                 if (is_iir()) {
                         it_out->second.assign(it_out->second.size(), 0);

@@ -214,6 +214,40 @@ events and their times will be logged. The client may accept input during
 operation to adjust these parameters, and it may provide information on the
 terminal as to the current state of the detector.
 
+** jfilter
+
+The function of *jfilter* is to filter the input data according to cutoff frequency 
+threshold. Filter types (high-pass, low-pass, band-pass, band-stop), cutoff 
+frequencies, orders (number of poles), or custom numerator and demoninator coefficients
+need to be specified.
+
+So far, jfilter only support Butterworth filter method. When using a big number(>=10) 
+for order and small cutoff frequency (order >= 10 for freq <= 300, and order >= 15 for
+freq <= 500), jfilter doesn't work as it supposed to be.
+
+*** JACK Ports                                                       :rel2_0:
+
++ in_NNN :: input. NNN is a numerical index. The number of ports and their type
+            is determined at startup by specifying a list of ports to connect to
+            the client.  The client may also create custom-named ported as
+            specified by the user.
++ out_NNN :: correspondent processed data, output. 
+
+The client will not make any changes to its port configuration during operation.
+
+*** JACK Events                                                      :rel2_0:
+
+1. When xrun happens, pads_reset is called to reset infinite impulse response.
+
+*** Options and behavior
+
+**** commandline options                                             :rel2_0:
+
+1. Filter type. Choose from high-pass, low-pass, band-pass, and band-stop.
+2. Cutoff frequency. 
+3. Order. Number of poles.
+4. Numerator and denominator. Parameters used for custom filter design.
+
 ** jflip
 
 The function of *jflip* is to whiten the input data by randomly inverting it around

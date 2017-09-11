@@ -7,6 +7,7 @@ using namespace jill;
 
 
 transfer_function::transfer_function(poly b, poly a) {
+        LOG << "transfer_function(b,a)";
         _numerator=b;
         _denominator=a;
         _is_analog_bool=true;
@@ -15,6 +16,7 @@ transfer_function::transfer_function(poly b, poly a) {
 transfer_function::transfer_function(std::vector<complex_t> z, 
                                      std::vector<complex_t> p,
                                      COEF_t k) {
+        LOG << "transfer_function(z,p,k)"; // LOG added to fix stack smashing error
         complex_t identity[0];
         identity[0] = complex_t(1,0);
         complex_poly num(identity, 0);
@@ -73,7 +75,7 @@ transfer_function::transform(poly transform_num, poly transform_denom){
        // with the numerator and denominator of the transfer function in
        // order to put the transfer function back into rational form
        int n = std::max(_numerator.degree(), _denominator.degree());
-       
+       LOG << "transform";
        poly new_num(0);
        poly new_denom(0);
        for (int k = 0; k < std::max(_numerator.size(), 

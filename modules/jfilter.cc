@@ -1,3 +1,14 @@
+/*
+ * jfilter - filter the input data according to cutoff frequencies using
+ * butterworth/custom method.
+ *
+* This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * Copyright (C) 2010-2013 C Daniel Meliza <dan || meliza.org>
+ */
 #include <iostream>
 #include <signal.h>
 #include <boost/shared_ptr.hpp>
@@ -56,6 +67,7 @@ static boost::shared_ptr<jack_client> client;
 static plist_t ports_in, ports_out;
 static int ret = EXIT_SUCCESS;
 static int running = 1;
+static unsigned int xrun = 0;
 
 
 static digital_filter filter; 
@@ -72,7 +84,7 @@ process (jack_client *client, nframes_t nframes, nframes_t time)
                 in = client->samples(*it_in, nframes);	  
                 if (in == 0) continue;
                 out = client->samples(*it_out, nframes);
-                filter.filter_buf(in, out, jack_port_name(*it_in), nframes);
+                filter.filter_buf(in, out, jack_port_name(*it_in), nframes);         
                 it_out++;
         }
   
@@ -102,7 +114,7 @@ jack_bufsize(jack_client *client, nframes_t nframes)
 int
 jack_xrun(jack_client *client, float delay)
 {
-        
+        xrun++;
         std::cout << "xrun: " << delay << std::endl;
         filter.reset_pads();
         return 0;
@@ -127,6 +139,7 @@ signal_handler(int sig)
 {
         ret = sig;
         running = 0;
+        exit(sig);
 }
 
 
@@ -205,11 +218,11 @@ main(int argc, char **argv)
                 // const jack_port_t* p = client->get_port(ports_out[0]);                        
                 // std::cout << jack_port_name(p) << std::endl;
                 // std::cout << ports_out[0] << std::endl;
-       
+
                 // register signal handlers
-		signal(SIGINT,  signal_handler);
+		        signal(SIGINT,  signal_handler);
                 signal(SIGTERM, signal_handler);
-		signal(SIGHUP,  signal_handler);
+		        signal(SIGHUP,  signal_handler);
 
                 // register jack callbacks
                 client->set_shutdown_callback(jack_shutdown);
@@ -224,7 +237,7 @@ main(int argc, char **argv)
                 // activate client
                 client->activate();
                 
-             
+
                 if (options.count("in")) {
                         plist_t::const_iterator it_port = ports_in.begin();
                         svec const & in_connections = options.vmap["in"].as<svec>();                        
@@ -280,10 +293,11 @@ main(int argc, char **argv)
 
                 while (running) {
                         usleep(100000);
-                }
 
+                }
+  
                 client->deactivate();
-		return ret;
+		return EXIT_SUCCESS;
 	}
 
 	/*
