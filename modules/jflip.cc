@@ -60,17 +60,12 @@ process(jack_client *client, nframes_t nframes, nframes_t)
     nframes_t inputSize = nframes;
 
     memcpy(out, in, nframes * sizeof(sample_t));
-    int i = 0;
-    std::srand(std::time(NULL));
-    while( i < inputSize) { 
-        int coin = rand()%2;
-        if (coin == 0) {
-            *(out+i) *= -1;
-        }
-        i++;
+
+    for (int i = 0; i < inputSize; i += 2) {
+        *(out + i) *= -1;
     }
 
-        return 0;
+    return 0;
 }
 
 
